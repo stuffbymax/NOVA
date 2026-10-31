@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <radialGradient id="world" cx=".28" cy=".23" r=".82">
+    <stop stop-color="#b5f2ee"/><stop offset=".18" stop-color="#48aeb8"/>
+    <stop offset=".52" stop-color="#1b628b"/><stop offset=".82" stop-color="#102c51"/>
+    <stop offset="1" stop-color="#050c1b"/>
+  </radialGradient>
+  <radialGradient id="shade" cx=".36" cy=".28">
+    <stop offset=".46" stop-color="#fff" stop-opacity="0"/>
+    <stop offset=".76" stop-color="#08152a" stop-opacity=".16"/><stop offset="1" stop-color="#02040b" stop-opacity=".9"/>
+  </radialGradient>
+  <linearGradient id="cloud" x1="0" y1="0" x2="1" y2="1">
+    <stop stop-color="#d9ffff" stop-opacity=".9"/><stop offset=".5" stop-color="#74d2d3" stop-opacity=".55"/>
+    <stop offset="1" stop-color="#356b91" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="glow"><feGaussianBlur stdDeviation="26"/></filter>
+  <filter id="shadow"><feGaussianBlur in="SourceAlpha" stdDeviation="17"/><feOffset dx="18" dy="27" result="o"/><feMerge><feMergeNode in="o"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <clipPath id="surface"><circle cx="512" cy="512" r="310"/></clipPath>
+</defs>
+<circle cx="512" cy="512" r="358" fill="#47c8d2" opacity=".14" filter="url(#glow)"/>
+<circle cx="512" cy="512" r="320" fill="#02040b" opacity=".65" transform="translate(15 24)"/>
+<circle cx="512" cy="512" r="310" fill="url(#world)" filter="url(#shadow)"/>
+<g clip-path="url(#surface)">
+  <path d="M206 420 Q252 344 327 366 Q364 382 354 427 Q337 458 296 452 Q264 486 220 473Z" fill="#588d64" opacity=".9"/>
+  <path d="M446 215 Q518 183 552 221 L566 268 541 306 572 352 536 386 493 354 461 322 424 281Z" fill="#79a96c"/>
+  <path d="M647 365 Q709 324 790 364 L822 411 787 450 746 441 719 486 673 470 653 429Z" fill="#4a8d69"/>
+  <path d="M344 554 Q396 521 429 554 L438 603 405 650 389 701 350 677 329 622Z" fill="#79a76d"/>
+  <path d="M603 583 Q656 544 708 570 L744 612 721 656 680 664 648 704 610 678 593 630Z" fill="#568b62"/>
+  <path d="M206 420 Q292 385 355 414 M438 255 Q488 230 550 249 M666 396 Q727 369 789 393 M347 596 Q392 566 426 580 M614 617 Q672 577 721 604" fill="none" stroke="#d7f0c7" stroke-width="12" opacity=".52"/>
+  <path d="M128 526 Q245 481 344 505 T556 507 T823 496 M182 694 Q283 646 408 670 T650 670 T875 635" fill="none" stroke="url(#cloud)" stroke-width="25" opacity=".52"/>
+  <path d="M210 310 Q337 255 453 296 M550 469 Q659 431 780 466 M303 746 Q441 714 554 744" fill="none" stroke="#e5fbff" stroke-width="8" opacity=".4"/>
+  <circle cx="512" cy="512" r="310" fill="url(#shade)"/>
+</g>
+<circle cx="512" cy="512" r="319" fill="none" stroke="#b6e9e9" stroke-width="4" opacity=".32"/>
+<ellipse cx="432" cy="337" rx="120" ry="38" transform="rotate(-32 432 337)" fill="#efffff" opacity=".13" filter="url(#glow)"/>
+</svg>

@@ -1,0 +1,8 @@
+{
+  "id": "sol_system_union",
+  "name": "Sol System Union",
+  "faction": "nova_concord",
+  "flag": "flag.svg",
+  "primary_color": "#43d5d0",
+  "secondary_color": "#ffc46b"
+}

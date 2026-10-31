@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1">
+    <stop stop-color="#d8e6e5"/><stop offset=".35" stop-color="#758d96"/>
+    <stop offset=".68" stop-color="#334c60"/><stop offset="1" stop-color="#172638"/>
+  </linearGradient>
+  <radialGradient id="window"><stop stop-color="#fff1bc"/><stop offset=".45" stop-color="#f8a85f"/><stop offset="1" stop-color="#d36949"/></radialGradient>
+  <filter id="shadow"><feGaussianBlur in="SourceAlpha" stdDeviation="10"/><feOffset dx="8" dy="14" result="o"/><feMerge><feMergeNode in="o"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <filter id="glow"><feGaussianBlur stdDeviation="9" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<g filter="url(#shadow)">
+  <ellipse cx="512" cy="512" rx="340" ry="192" transform="rotate(-24 512 512)" fill="none" stroke="#101c2c" stroke-width="92"/>
+  <ellipse cx="512" cy="512" rx="340" ry="192" transform="rotate(-24 512 512)" fill="none" stroke="url(#metal)" stroke-width="54"/>
+  <ellipse cx="512" cy="512" rx="340" ry="192" transform="rotate(-24 512 512)" fill="none" stroke="#83cbc9" stroke-width="4" stroke-dasharray="36 20"/>
+  <path d="M512 412 L608 458 L633 512 L608 566 L512 612 L416 566 L391 512 L416 458Z" fill="url(#metal)" stroke="#b7d5d4" stroke-width="7"/>
+  <path d="M416 458 L306 340 L346 315 L470 421 M608 458 L718 340 L678 315 L554 421 M416 566 L306 684 L346 709 L470 603 M608 566 L718 684 L678 709 L554 603" fill="url(#metal)" stroke="#7ea7ad" stroke-width="7"/>
+  <circle cx="512" cy="512" r="127" fill="#15283a" stroke="#8abdbd" stroke-width="12"/>
+  <circle cx="512" cy="512" r="86" fill="#263e50" stroke="#d4e5df" stroke-width="5"/>
+  <path d="M467 490 L512 439 L557 490 L557 540 L512 585 L467 540Z" fill="#435c69" stroke="#b7d5d4" stroke-width="4"/>
+</g>
+<g fill="url(#window)" filter="url(#glow)">
+  <circle cx="512" cy="512" r="20"/><circle cx="449" cy="473" r="8"/><circle cx="575" cy="473" r="8"/>
+  <circle cx="449" cy="551" r="8"/><circle cx="575" cy="551" r="8"/>
+  <circle cx="278" cy="328" r="8"/><circle cx="746" cy="328" r="8"/>
+  <circle cx="278" cy="696" r="8"/><circle cx="746" cy="696" r="8"/>
+</g>
+<g stroke="#d3e7e5" stroke-width="3" opacity=".8">
+  <path d="M462 507H482 M542 517H562 M502 452V472 M522 552V572"/>
+</g>
+</svg>
