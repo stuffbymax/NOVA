@@ -1,0 +1,31 @@
+Everything is written in Python.
+
+
+
+2D graphical presentation.
+
+
+
+Images, icons, maps and illustrations.
+
+
+
+Gameplay is primarily clicking, selecting, reading and entering text.
+- you can edit everyting from planet to galaxy
+
+
+Real-time simulation with pause and adjustable speed.
+
+
+
+Deep, interconnected simulation.
+
+
+
+Highly moddable, with Python scripting support.
+
+
+
+Linux and windows as the primary development platform.
+
+mod menu/commands support for cheating
