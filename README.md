@@ -24,18 +24,20 @@ galaxy_name = "Milky Way"
 The galaxy view shows its name, sector, morphology, system count, seed, and
 diameter. The map distinguishes star types and system survey status, marks
 gateways, wormholes, anomalies, Union territory, and the Frontier Survey Group,
-and highlights routes from the selected system. The P toggle displays faction
-ownership as translucent territory regions with faction-colored borders and
-labels; connected systems owned by the same faction are joined into a contiguous
-territory region. Colonizing a planet expands its owner's region. Use the status
-dropdown and search field to filter stars; press Enter in search to locate and
-center a match. Zoom with the mouse wheel, pan with the right mouse button, and
-press Home to reset the map. Map overlays are toggled with P (territory), T
-(trade routes between Union systems), R (surveyed resources), S (sensor
-coverage), F (fog of war), and E (exploration). Ctrl+B bookmarks the selected
-system and B jumps to the next bookmark. Fog hides uncharted systems outside
-Union sensor coverage. Spiral, elliptical, and irregular sectors use different
-density profiles; positions also include galactic height. Generated stars use a
+and highlights routes from the selected system. Click a star to select it while
+keeping the galaxy map open; use the SYSTEM tab to switch to its orbital view.
+The map toolbar toggles ownership, fleets, trade routes, resources, sensors,
+fog, and exploration layers; keyboard shortcuts P, T, R, S, F, and E remain
+available. Ownership appears as translucent territory regions with colored
+frontier lines and faction labels; connected systems owned by the same faction
+are joined into a contiguous territory region. Colonizing a planet expands its
+owner's region. Use the status dropdown and search field to filter stars; press
+Enter in search to locate and center a match. Zoom with the mouse wheel, pan
+with the right mouse button, and press Home to reset the map. Ctrl+B bookmarks
+the selected system and B jumps to the next bookmark. Fog hides uncharted
+systems outside Union sensor coverage. Spiral, elliptical, and irregular
+sectors use different density profiles; positions also include galactic height.
+Generated stars use a
 weighted spectral distribution, approximate masses, luminosities, ages, and
 metallicity gradients. Binary systems constrain stable planet orbits. Planets
 have ordered AU-scale orbits, mass and radius estimates, and only long-lived
@@ -77,6 +79,28 @@ buildings; later projects require their prerequisites. Commission fleets with
 **NEW FLEET**, select a destination system on the map, then use **MOVE FLEET**.
 Fleets follow the generated route network and move while the simulation runs.
 The Veyran Compact expands toward unclaimed habitable worlds over time.
+
+## First contact, diplomacy, and conflict
+
+Rival civilizations begin as intercepted signals, not established
+relationships. Survey a Veyran-held system to open first contact, then use the
+**DIPLO** tab to send envoys, negotiate non-aggression, trade and research
+agreements, sign a defensive pact, or declare war. Envoys cost influence
+and have a cooldown; proposals depend on the rival's opinion. Trade and
+research agreements have ongoing effects on the Union's income. Active
+agreements must be broken before war can be declared, and peace can be
+negotiated after the rival is defeated or the war has lasted long enough. The
+defensive pact currently prevents a direct declaration of war; mutual military
+assistance is not implemented yet.
+
+War changes the map: fleets fight automatically when they enter hostile
+systems, ship losses are recorded, and victories transfer system ownership.
+Rival fleets retaliate against Union territory while hostilities continue.
+Fleet markers use different colors for Union and rival forces. The Chronicle
+records first contact, negotiations, declarations, battles, territorial
+changes, and ceasefires. These strategic systems are an initial playable
+foundation; full tactical combat and the broader political and diplomatic
+systems remain future work.
 
 Use **F5** for a quick save, **F9** to load it, and **F10** to return to the
 main menu. Saves are versioned, checksummed JSON files in `saves/`; override

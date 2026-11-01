@@ -42,6 +42,8 @@ class GameWindow:
         self.screen: pygame.Surface | None = None
         self._clock = pygame.time.Clock()
         self._running = False
+        self._observed_campaign = application.campaign
+        self._known_campaign_events = list(application.campaign.log)
         self._menu_active = False
         self._menu_message = ""
         self._selected_species_id = application.campaign.player_species_id
@@ -94,6 +96,7 @@ class GameWindow:
         self.research_button: Button | None = None
         self.create_fleet_button: Button | None = None
         self.move_fleet_button: Button | None = None
+        self.diplomatic_action: Dropdown | None = None
         self._widgets: list[FocusableWidget] = []
         self._focusables: list[FocusableWidget] = []
 
@@ -119,6 +122,7 @@ class GameWindow:
                 self._handle_events()
                 delta = self._clock.tick(60) / 1000.0
                 self.application.update(delta)
+                self._poll_campaign_news()
                 self.ui.update(delta)
                 self._draw()
                 pygame.display.flip()
@@ -227,29 +231,7 @@ class GameWindow:
                     }
                     layer = map_layers.get(event.key)
                     if layer is not None:
-                        setattr(self, layer, not getattr(self, layer))
-                        if event.key == pygame.K_f:
-                            if self._fog_of_war:
-                                sensor_system_ids = self._sensor_system_ids()
-                                selected = self.application.campaign.get_system(
-                                    self._selected_system
-                                )
-                                if not self._is_system_visible(
-                                    selected,
-                                    sensor_system_ids,
-                                ):
-                                    self._selected_system = next(
-                                        system.system_id
-                                        for system in self.application.campaign.systems
-                                        if self._is_system_visible(
-                                            system,
-                                            sensor_system_ids,
-                                        )
-                                    )
-                                    self._set_selected_map_system(
-                                        self._selected_system
-                                    )
-                            self._filter_content()
+                        self._toggle_map_layer(layer)
                         continue
                 if (
                     event.key == pygame.K_HOME
@@ -310,11 +292,13 @@ class GameWindow:
                 event.type == pygame.MOUSEBUTTONDOWN
                 and event.button == 1
                 and self._map_rect().collidepoint(event.pos)
-                and self._select_map_item(event.pos)
             ):
-                if self.search is not None:
-                    self.search.focused = False
-                continue
+                if self._handle_map_layer_click(event.pos):
+                    continue
+                if self._select_map_item(event.pos):
+                    if self.search is not None:
+                        self.search.focused = False
+                    continue
 
             self.windows.handle(event)
             self._layout_ui()
@@ -403,6 +387,10 @@ class GameWindow:
             self.action_button.draw(self.screen, small_font, theme)
         elif self.tabs.active == "CHRONICLE":
             self._draw_chronicle(small_font)
+        elif self.tabs.active == "DIPLOMACY":
+            self._draw_diplomacy(small_font)
+            self.action_button.label = "CONFIRM DIPLOMATIC ACTION"
+            self.action_button.draw(self.screen, small_font, theme)
         else:
             self._draw_empire(small_font, height < 560)
             self.action_button.label = "BUILD SELECTED"
@@ -435,6 +423,11 @@ class GameWindow:
                 "Choose a building above  |  build  |  research  |  commission or move fleets  |  "
                 "F5 save  F9 load  F10 menu"
             )
+        elif self.tabs.active == "DIPLOMACY":
+            help_text = (
+                "Survey rival territory to establish contact  |  negotiate, form pacts, "
+                "or declare war  |  fleets engage hostile systems"
+            )
         elif self.tabs.active == "CHRONICLE":
             help_text = "Empire history  |  F5 save  F9 load  F10 menu"
         else:
@@ -448,6 +441,31 @@ class GameWindow:
         )
         self._label(help_text, (18, height - 22), help_font, theme.muted)
         self.ui.draw_overlays(self.screen, small_font, small_font)
+
+    def _poll_campaign_news(self) -> None:
+        campaign = self.application.campaign
+        if campaign is not self._observed_campaign:
+            self._observed_campaign = campaign
+            self._known_campaign_events = list(campaign.log)
+            return
+        events = campaign.log
+        previous = (
+            self._known_campaign_events[-1]
+            if self._known_campaign_events
+            else None
+        )
+        if previous in events:
+            new_events = events[events.index(previous) + 1 :]
+        else:
+            new_events = events
+        self._known_campaign_events = list(events)
+        for event in new_events[-3:]:
+            message = event.split("  ", 1)[-1]
+            if not any(
+                notification.message == message
+                for notification in self.ui.notifications
+            ):
+                self.ui.notify(message)
 
     def _show_main_menu(self) -> None:
         self._menu_active = True
@@ -630,12 +648,16 @@ class GameWindow:
         self.windows.add(panel)
         self.tabs = TabBar(
             pygame.Rect(0, 0, 1, 1),
-            ["GALAXY", "SYSTEM", "EMPIRE", "CHRONICLE"],
+            ["GALAXY", "SYSTEM", "EMPIRE", "DIPLOMACY", "CHRONICLE"],
         )
         self.search = TextInput(pygame.Rect(0, 0, 1, 1), "Search...")
         self.dropdown = Dropdown(
             pygame.Rect(0, 0, 1, 1),
             ["All", "Uncharted", "Surveyed", "Colonized"],
+        )
+        self.diplomatic_action = Dropdown(
+            pygame.Rect(0, 0, 1, 1),
+            ["First contact pending"],
         )
         self.systems = TableWidget(
             pygame.Rect(0, 0, 1, 1),
@@ -804,9 +826,27 @@ class GameWindow:
                     content_width,
                     round(30 * scale),
                 )
-                if self.tabs is not None and self.tabs.active == "EMPIRE"
+                if self.tabs is not None
+                and self.tabs.active in ("EMPIRE", "DIPLOMACY")
                 else pygame.Rect(0, 0, 1, 1)
             )
+            assert self.diplomatic_action is not None
+            self.diplomatic_action.rect = (
+                pygame.Rect(
+                    content_x,
+                    self.dropdown.rect.bottom + gap,
+                    content_width,
+                    round(30 * scale),
+                )
+                if self.tabs is not None and self.tabs.active == "DIPLOMACY"
+                else pygame.Rect(0, 0, 1, 1)
+            )
+            if self.tabs is not None and self.tabs.active == "DIPLOMACY":
+                self.systems.rect.y = self.diplomatic_action.rect.bottom + gap
+                self.systems.rect.height = max(
+                    1,
+                    action_y - self.systems.rect.y - round(8 * scale),
+                )
             return
         self.tabs.rect = pygame.Rect(
             content_x,
@@ -821,18 +861,34 @@ class GameWindow:
                 content_width,
                 round(34 * scale),
             )
-            if self.tabs is None or self.tabs.active != "EMPIRE"
+            if self.tabs is None or self.tabs.active not in ("EMPIRE", "DIPLOMACY")
             else pygame.Rect(0, 0, 1, 1)
         )
         self.dropdown.rect = pygame.Rect(
             content_x,
             rect.y
             + round(
-                (86 if self.tabs is not None and self.tabs.active == "EMPIRE" else 128)
+                (
+                    86
+                    if self.tabs is not None
+                    and self.tabs.active in ("EMPIRE", "DIPLOMACY")
+                    else 128
+                )
                 * scale
             ),
             content_width,
             round(34 * scale),
+        )
+        assert self.diplomatic_action is not None
+        self.diplomatic_action.rect = (
+            pygame.Rect(
+                content_x,
+                self.dropdown.rect.bottom + round(6 * scale),
+                content_width,
+                round(34 * scale),
+            )
+            if self.tabs is not None and self.tabs.active == "DIPLOMACY"
+            else pygame.Rect(0, 0, 1, 1)
         )
         bottom_row_y = rect.bottom - round(61 * scale)
         button_height = round(34 * scale)
@@ -908,7 +964,11 @@ class GameWindow:
             ):
                 if button is not None:
                     button.rect = pygame.Rect(0, 0, 1, 1)
-        table_y = self.dropdown.rect.bottom + round(8 * scale)
+        table_y = (
+            self.diplomatic_action.rect.bottom + round(8 * scale)
+            if self.tabs is not None and self.tabs.active == "DIPLOMACY"
+            else self.dropdown.rect.bottom + round(8 * scale)
+        )
         reserved_details_height = round(
             (
                 300
@@ -958,10 +1018,17 @@ class GameWindow:
             self._configure_visible_widgets()
             self._layout_ui()
             self.dropdown.options = self._dropdown_options()
-            self.dropdown.selected = self.dropdown.options[0]
+            if self.dropdown.options:
+                self.dropdown.selected = self.dropdown.options[0]
+            if self.diplomatic_action is not None:
+                self.diplomatic_action.options = self._diplomatic_action_options()
+                if self.diplomatic_action.options:
+                    self.diplomatic_action.selected = self.diplomatic_action.options[0]
         if self.tabs.active == "CHRONICLE":
             return
         if self.tabs.active == "EMPIRE":
+            return
+        if self.tabs.active == "DIPLOMACY":
             return
         query = self.search.text.casefold().strip()
         category = self.dropdown.selected
@@ -1225,7 +1292,7 @@ class GameWindow:
         systems: list[StarSystem],
     ) -> None:
         assert self.screen is not None
-        polygons, _ = self._territory_geometry(bounds)
+        polygons, borders = self._territory_geometry(bounds)
         if not polygons:
             return
         owners = sorted({system.owner for system in systems if system.owner})
@@ -1301,6 +1368,19 @@ class GameWindow:
                     8,
                 )
                 pygame.draw.lines(self.screen, color, True, outline, 5)
+
+        for owner, start, end in borders:
+            color = self._owner_color(owner, owners)
+            screen_start = (
+                round(bounds.centerx + start[0] * self._galaxy_zoom + self._map_pan.x),
+                round(bounds.centery + start[1] * self._galaxy_zoom + self._map_pan.y),
+            )
+            screen_end = (
+                round(bounds.centerx + end[0] * self._galaxy_zoom + self._map_pan.x),
+                round(bounds.centery + end[1] * self._galaxy_zoom + self._map_pan.y),
+            )
+            pygame.draw.line(self.screen, (8, 12, 22), screen_start, screen_end, 5)
+            pygame.draw.line(self.screen, color, screen_start, screen_end, 2)
 
         for owner in owners:
             owned_systems = [
@@ -1411,6 +1491,8 @@ class GameWindow:
         return [(obj.name, obj.kind, obj.world_type) for obj in system.objects]
 
     def _dropdown_options(self) -> list[str]:
+        if self.tabs is not None and self.tabs.active == "DIPLOMACY":
+            return [empire.name for empire in self.application.campaign.ai_empires]
         if self.tabs is not None and self.tabs.active == "EMPIRE":
             campaign = self.application.campaign
             return [
@@ -1429,6 +1511,47 @@ class GameWindow:
             "All",
             *dict.fromkeys(system.status for system in self.application.campaign.systems),
         ]
+
+    def _diplomatic_action_options(self) -> list[str]:
+        if self.tabs is None or self.tabs.active != "DIPLOMACY":
+            return ["First contact pending"]
+        campaign = self.application.campaign
+        empire = next(
+            (
+                item
+                for item in campaign.ai_empires
+                if self.dropdown is not None
+                and item.name == self.dropdown.selected
+            ),
+            campaign.ai_empires[0] if campaign.ai_empires else None,
+        )
+        if empire is None:
+            return ["No known civilizations"]
+        relation = campaign.get_relation(empire.empire_id)
+        if not relation.first_contact:
+            return ["First contact pending - survey their space"]
+        actions = ["Send envoy"]
+        treaty_labels = {
+            "non_aggression": "Non-aggression pact",
+            "trade": "Trade agreement",
+            "research": "Research agreement",
+            "defensive_alliance": "Defensive alliance",
+        }
+        for treaty_id, treaty_name in treaty_labels.items():
+            if treaty_id not in relation.treaties and (
+                treaty_id != "defensive_alliance"
+                or "non_aggression" in relation.treaties
+            ):
+                actions.append(f"Propose {treaty_name.lower()}")
+        actions.extend(
+            f"Break {treaty_labels[treaty_id]}"
+            for treaty_id in relation.treaties
+        )
+        if relation.at_war:
+            actions.append("Negotiate peace")
+        else:
+            actions.append("Declare war")
+        return actions
 
     def _configure_visible_widgets(self) -> None:
         assert self.tabs is not None
@@ -1482,6 +1605,15 @@ class GameWindow:
                 self.research_button,
                 self.create_fleet_button,
                 self.move_fleet_button,
+                *common[1:],
+            ]
+        elif self.tabs.active == "DIPLOMACY":
+            assert self.diplomatic_action is not None
+            self._widgets = [
+                self.tabs,
+                self.dropdown,
+                self.diplomatic_action,
+                self.action_button,
                 *common[1:],
             ]
         else:
@@ -1579,10 +1711,86 @@ class GameWindow:
         ):
             return False
         self._set_selected_map_system(nearest.system_id)
-        if self.tabs is not None:
-            self.tabs.active = "SYSTEM"
-            self._filter_content()
         return True
+
+    def _map_layer_options(self) -> tuple[tuple[str, str], ...]:
+        return (
+            ("_show_borders", "OWNERS"),
+            ("_show_fleets", "FLEETS"),
+            ("_show_trade_routes", "TRADE"),
+            ("_show_resources", "RES"),
+            ("_show_sensors", "SENSE"),
+            ("_fog_of_war", "FOG"),
+            ("_show_exploration", "EXPLORE"),
+        )
+
+    def _map_layer_button_rects(
+        self,
+        bounds: pygame.Rect,
+    ) -> list[tuple[str, str, pygame.Rect]]:
+        options = self._map_layer_options()
+        gap = 4
+        x = bounds.x + 12
+        y = bounds.y + 46
+        height = 24
+        available_width = max(1, bounds.width - 24 - gap * (len(options) - 1))
+        button_width = available_width // len(options)
+        return [
+            (
+                attribute,
+                label,
+                pygame.Rect(
+                    x + index * (button_width + gap),
+                    y,
+                    button_width
+                    if index < len(options) - 1
+                    else bounds.right - 12 - (x + index * (button_width + gap)),
+                    height,
+                ),
+            )
+            for index, (attribute, label) in enumerate(options)
+        ]
+
+    def _toggle_map_layer(self, attribute: str) -> None:
+        setattr(self, attribute, not getattr(self, attribute))
+        if attribute != "_fog_of_war":
+            return
+        if self._fog_of_war:
+            sensor_system_ids = self._sensor_system_ids()
+            selected = self.application.campaign.get_system(self._selected_system)
+            if not self._is_system_visible(selected, sensor_system_ids):
+                self._selected_system = next(
+                    system.system_id
+                    for system in self.application.campaign.systems
+                    if self._is_system_visible(system, sensor_system_ids)
+                )
+                self._set_selected_map_system(self._selected_system)
+        self._filter_content()
+
+    def _handle_map_layer_click(self, position: tuple[int, int]) -> bool:
+        if self.tabs is None or self.tabs.active != "GALAXY":
+            return False
+        for attribute, _, rect in self._map_layer_button_rects(self._map_rect()):
+            if rect.collidepoint(position):
+                self._toggle_map_layer(attribute)
+                return True
+        return False
+
+    def _draw_map_layer_controls(self, bounds: pygame.Rect) -> None:
+        assert self.screen is not None
+        theme = self.ui.theme
+        font = self.ui.fonts.get(10)
+        for attribute, label, rect in self._map_layer_button_rects(bounds):
+            active = getattr(self, attribute)
+            surface = pygame.Surface(rect.size, pygame.SRCALPHA)
+            fill = (*theme.accent, 48) if active else (5, 11, 22, 210)
+            pygame.draw.rect(surface, fill, surface.get_rect(), border_radius=3)
+            self.screen.blit(surface, rect.topleft)
+            border = theme.accent if active else (64, 82, 105)
+            pygame.draw.rect(self.screen, border, rect, 1, border_radius=3)
+            color = theme.accent if active else theme.muted
+            rendered = font.render(label, True, color)
+            self.screen.blit(rendered, rendered.get_rect(center=rect.center))
 
     def _scaled_asset(self, name: str, size: tuple[int, int]) -> pygame.Surface:
         return self.assets.scaled(name, size)
@@ -1765,7 +1973,9 @@ class GameWindow:
                 label_candidates.append((label_priority, system, position))
 
         if self._show_fleets:
-            for fleet in campaign.fleets:
+            for fleet in campaign.all_fleets:
+                if fleet.ship_count <= 0:
+                    continue
                 if (
                     self._fog_of_war
                     and fleet.system_id not in sensor_system_ids
@@ -1777,7 +1987,9 @@ class GameWindow:
                 )
                 pygame.draw.polygon(
                     self.screen,
-                    (110, 231, 245),
+                    (110, 231, 245)
+                    if fleet.owner_id == "union"
+                    else (255, 123, 111),
                     (
                         (fleet_position[0], fleet_position[1] - 9),
                         (fleet_position[0] + 7, fleet_position[1] + 6),
@@ -1789,7 +2001,9 @@ class GameWindow:
                         fleet.name,
                         (fleet_position[0] + 10, fleet_position[1] - 6),
                         self.ui.fonts.get(11),
-                        (110, 231, 245),
+                        (110, 231, 245)
+                        if fleet.owner_id == "union"
+                        else (255, 123, 111),
                     )
 
         label_font = self.ui.fonts.get(13)
@@ -1828,6 +2042,14 @@ class GameWindow:
         pygame.draw.rect(self.screen, theme.muted, bounds, 1)
         previous_clip = self.screen.get_clip()
         self.screen.set_clip(bounds)
+        header = pygame.Surface((max(1, bounds.width - 8), 94), pygame.SRCALPHA)
+        pygame.draw.rect(
+            header,
+            (5, 11, 22, 220),
+            header.get_rect(),
+            border_radius=5,
+        )
+        self.screen.blit(header, (bounds.x + 4, bounds.y + 4))
         self._label(
             (
                 f"{campaign.galaxy.name.upper()}  /  "
@@ -1836,47 +2058,8 @@ class GameWindow:
             ),
             (bounds.x + 12, bounds.y + 8),
             self.ui.fonts.get(14),
-            theme.muted,
+            theme.text,
         )
-        layer_status = " ".join(
-            label
-            for enabled, label in (
-                (self._show_borders, "TERRITORY"),
-                (self._show_fleets, "FLEET"),
-                (self._show_trade_routes, "TRADE"),
-                (self._show_resources, "RES"),
-                (self._show_sensors, "SENSOR"),
-                (self._fog_of_war, "FOG"),
-                (self._show_exploration, "EXPLORE"),
-            )
-            if enabled
-        )
-        if self._selected_system in campaign.map_bookmarks:
-            layer_status = f"{layer_status}  BOOKMARK" if layer_status else "BOOKMARK"
-        ownership_status = (
-            ", ".join(territory_owners) or "NONE"
-            if self._show_borders
-            else "HIDDEN"
-        )
-        self._label(
-            f"OWNERSHIP: {ownership_status}  |  {layer_status}",
-            (bounds.x + 12, bounds.y + 64),
-            self.ui.fonts.get(11),
-            theme.muted,
-        )
-        legend_y = bounds.y + 49
-        legend_font = self.ui.fonts.get(12)
-        legend = (
-            (theme.muted, "OPEN"),
-            (theme.warning, "SURVEYED"),
-            (theme.accent, "COLONY"),
-        )
-        legend_x = bounds.x + 12
-        legend_step = max(64, min(98, (bounds.width - 24) // len(legend)))
-        for color, label_text in legend:
-            pygame.draw.circle(self.screen, color, (legend_x + 5, legend_y + 6), 4, 1)
-            self._label(label_text, (legend_x + 13, legend_y), legend_font, theme.muted)
-            legend_x += legend_step
         self._label(
             (
                 f"{len(visible_systems) if self._fog_of_war else len(campaign.systems)} "
@@ -1887,6 +2070,29 @@ class GameWindow:
             self.ui.fonts.get(13),
             theme.muted,
         )
+        self._draw_map_layer_controls(bounds)
+        legend_y = bounds.y + 76
+        legend_x = bounds.x + 12
+        if self._show_borders:
+            for owner in territory_owners:
+                color = self._owner_color(owner, territory_owners)
+                pygame.draw.circle(self.screen, color, (legend_x + 4, legend_y + 5), 3)
+                self._label(
+                    owner.upper(),
+                    (legend_x + 12, legend_y),
+                    self.ui.fonts.get(10),
+                    theme.muted,
+                )
+                legend_x += self.ui.fonts.get(10).size(owner.upper())[0] + 26
+                if legend_x > bounds.right - 72:
+                    break
+        else:
+            self._label(
+                "POLITICAL BORDERS HIDDEN",
+                (legend_x, legend_y),
+                self.ui.fonts.get(10),
+                theme.muted,
+            )
         self.screen.set_clip(previous_clip)
 
     def _draw_map_card(self) -> None:
@@ -2514,6 +2720,124 @@ class GameWindow:
                 break
         self.screen.set_clip(previous_clip)
 
+    def _draw_diplomacy(self, font: pygame.font.Font) -> None:
+        assert self.screen is not None
+        assert self.systems is not None
+        assert self.dropdown is not None
+        assert self.diplomatic_action is not None
+        campaign = self.application.campaign
+        empire = next(
+            (
+                item
+                for item in campaign.ai_empires
+                if item.name == self.dropdown.selected
+            ),
+            campaign.ai_empires[0] if campaign.ai_empires else None,
+        )
+        self.diplomatic_action.options = self._diplomatic_action_options()
+        if self.diplomatic_action.options and (
+            self.diplomatic_action.selected not in self.diplomatic_action.options
+        ):
+            self.diplomatic_action.selected = self.diplomatic_action.options[0]
+        self.dropdown.draw(self.screen, self.ui.fonts.get(13), self.ui.theme)
+        self.diplomatic_action.draw(
+            self.screen,
+            self.ui.fonts.get(13),
+            self.ui.theme,
+        )
+        if empire is None:
+            return
+        profile = campaign.species_catalog[empire.species_id]
+        relation = campaign.get_relation(empire.empire_id)
+        rect = self.systems.rect
+        theme = self.ui.theme
+        x = rect.x + 3
+        y = rect.y + 7
+        emblem_width = min(128, rect.width - 6)
+        emblem = self._scaled_asset(
+            f"civilizations/{empire.species_id}.svg",
+            (emblem_width, 64),
+        )
+        self.screen.blit(emblem, (x, y))
+        y += 72
+        status = (
+            "AT WAR"
+            if relation.at_war
+            else "CONTACT ESTABLISHED"
+            if relation.first_contact
+            else "NO ESTABLISHED CONTACT"
+        )
+        self._label(
+            f"{empire.name.upper()}  /  {status}",
+            (x, y),
+            self.ui.fonts.get(17),
+            theme.warning if relation.at_war else theme.accent,
+        )
+        y += 24
+        self._label(
+            f"Species: {profile.name}  |  {', '.join(profile.classification)}",
+            (x, y),
+            font,
+            theme.text,
+        )
+        y += 21
+        if not relation.first_contact:
+            homeworlds = ", ".join(
+                campaign.get_system(system_id).name
+                for system_id in empire.system_ids
+            )
+            paragraphs = [
+                f"Untranslated transmissions detected near {homeworlds}.",
+                "Survey a rival-held star system to establish first contact and open diplomatic channels.",
+                (
+                    "Fleet strength: "
+                    f"{sum(fleet.ship_count for fleet in campaign.ai_fleets if fleet.owner_id == empire.empire_id)} ships."
+                ),
+            ]
+        else:
+            treaty_names = {
+                "non_aggression": "Non-aggression",
+                "trade": "Trade",
+                "research": "Research",
+                "defensive_alliance": "Defensive alliance",
+            }
+            treaties = ", ".join(
+                treaty_names[treaty] for treaty in relation.treaties
+            ) or "None"
+            war_status = (
+                f"War duration: {campaign.elapsed_days - (relation.war_started_day or 0):.0f} days."
+                if relation.at_war
+                else "Peace is holding."
+            )
+            known_systems = ", ".join(
+                campaign.get_system(system_id).name
+                for system_id in empire.system_ids
+            )
+            paragraphs = [
+                f"Opinion: {relation.opinion:+d}  |  Trust: {relation.trust}/100",
+                f"Active agreements: {treaties}.",
+                war_status,
+                f"Known territory: {known_systems}.",
+                (
+                    "Trade agreements improve energy income; research agreements "
+                    "increase research output."
+                ),
+                (
+                    "Wartime fleets fight when they enter hostile systems. "
+                    "Victory transfers system control."
+                ),
+            ]
+        previous_clip = self.screen.get_clip()
+        self.screen.set_clip(rect)
+        for paragraph in paragraphs:
+            for line in self._wrap_text(font, paragraph, rect.width - 10):
+                if y + font.get_linesize() >= rect.bottom:
+                    break
+                self._label(line, (x, y), font, theme.text)
+                y += font.get_linesize() + 4
+            y += 8
+        self.screen.set_clip(previous_clip)
+
     def _draw_empire(self, font: pygame.font.Font, compact: bool) -> None:
         assert self.screen is not None
         assert self.overview is not None
@@ -2579,7 +2903,9 @@ class GameWindow:
                 f"{system.name} / {planet.name}: {colony.population_billions:.2f}B "
                 f"| {colony.happiness:.0%} approval | {buildings}"
             )
-        for fleet in campaign.fleets:
+        for fleet in campaign.all_fleets:
+            if fleet.ship_count <= 0:
+                continue
             destination = (
                 f" -> {campaign.get_system(fleet.destination_id).name}"
                 if fleet.destination_id
@@ -2701,6 +3027,9 @@ class GameWindow:
         return lines
 
     def _perform_selected_action(self) -> None:
+        if self.tabs is not None and self.tabs.active == "DIPLOMACY":
+            self._perform_diplomatic_action()
+            return
         if self.tabs is not None and self.tabs.active == "EMPIRE":
             assert self.dropdown is not None
             campaign = self.application.campaign
@@ -2740,6 +3069,65 @@ class GameWindow:
             return
         self.ui.notify(message)
         self._filter_content()
+
+    def _perform_diplomatic_action(self) -> None:
+        assert self.dropdown is not None
+        assert self.diplomatic_action is not None
+        campaign = self.application.campaign
+        empire = next(
+            (
+                item
+                for item in campaign.ai_empires
+                if item.name == self.dropdown.selected
+            ),
+            None,
+        )
+        if empire is None:
+            self.ui.notify("No civilization is available for diplomacy")
+            return
+        action = self.diplomatic_action.selected
+        treaty_ids = {
+            "Propose non-aggression pact": "non_aggression",
+            "Propose trade agreement": "trade",
+            "Propose research agreement": "research",
+            "Propose defensive alliance": "defensive_alliance",
+        }
+        break_ids = {
+            f"Break {label}": treaty_id
+            for treaty_id, label in (
+                ("non_aggression", "Non-aggression pact"),
+                ("trade", "Trade agreement"),
+                ("research", "Research agreement"),
+                ("defensive_alliance", "Defensive alliance"),
+            )
+        }
+        try:
+            if action == "Send envoy":
+                message = campaign.send_envoy(empire.empire_id)
+            elif action in treaty_ids:
+                message = campaign.propose_treaty(
+                    empire.empire_id,
+                    treaty_ids[action],
+                )
+            elif action in break_ids:
+                message = campaign.break_treaty(
+                    empire.empire_id,
+                    break_ids[action],
+                )
+            elif action == "Declare war":
+                message = campaign.declare_war(empire.empire_id)
+            elif action == "Negotiate peace":
+                message = campaign.negotiate_peace(empire.empire_id)
+            else:
+                self.ui.notify("Survey rival territory to establish first contact")
+                return
+        except (KeyError, ValueError) as error:
+            self.ui.notify(str(error))
+            return
+        self.diplomatic_action.options = self._diplomatic_action_options()
+        if self.diplomatic_action.options:
+            self.diplomatic_action.selected = self.diplomatic_action.options[0]
+        self.ui.notify(message)
 
     def _text_input_focused(self) -> bool:
         return self.search is not None and self.search.focused

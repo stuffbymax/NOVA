@@ -302,25 +302,25 @@
 
 ## 15. Diplomacy
 
-- [ ] Implement diplomatic relationships
-- [ ] Implement diplomatic opinions
-- [ ] Implement diplomatic proposals
+- [✔ ] Implement diplomatic relationships
+- [✔ ] Implement diplomatic opinions
+- [✔ ] Implement diplomatic proposals
 - [ ] Implement alliances
-- [ ] Implement non-aggression pacts
+- [✔ ] Implement non-aggression pacts
 - [ ] Implement defensive agreements
 - [ ] Implement military alliances
-- [ ] Implement trade agreements
-- [ ] Implement research agreements
-- [ ] Implement diplomatic negotiations
+- [✔ ] Implement trade agreements
+- [✔ ] Implement research agreements
+- [✔ ] Implement diplomatic negotiations
 - [ ] Implement territorial negotiations
 - [ ] Implement vassal relationships
 - [ ] Implement subject empires
 - [ ] Implement federations
 - [ ] Implement sanctions
 - [ ] Implement embargoes
-- [ ] Implement war declarations
-- [ ] Implement peace treaties
-- [ ] Implement diplomatic history
+- [✔ ] Implement war declarations
+- [✔ ] Implement peace treaties
+- [✔ ] Implement diplomatic history
 
 ## 16. Military and Fleets
 
@@ -388,7 +388,7 @@
 - [ ] Implement archaeological sites
 - [ ] Implement ancient civilisations
 - [ ] Implement precursor technologies
-- [ ] Implement first contact
+- [✔ ] Implement first contact
 - [ ] Implement exploration rewards
 - [ ] Implement discovery reports
 

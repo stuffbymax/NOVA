@@ -59,18 +59,45 @@ def test_galaxy_pan_is_clamped_and_map_draws(game_window: GameWindow) -> None:
     window._draw_map_card()
 
 
-def test_clicking_a_star_opens_its_system(game_window: GameWindow) -> None:
+def test_clicking_a_star_selects_it_without_leaving_galaxy_map(
+    game_window: GameWindow,
+) -> None:
     window = game_window
     position = window._map_position("asterion")
 
     assert window._select_map_item(position)
     assert window._selected_system == "asterion"
+    assert window.tabs is not None
+    assert window.tabs.active == "GALAXY"
     window.application.campaign.get_object(
         window._selected_system,
         window._selected_object,
     )
+
+
+def test_map_layer_controls_toggle_from_the_map(game_window: GameWindow) -> None:
+    window = game_window
+    assert window.screen is not None
     assert window.tabs is not None
-    assert window.tabs.active == "SYSTEM"
+    window._draw_galaxy_map()
+    _, _, fog_button = next(
+        entry
+        for entry in window._map_layer_button_rects(window._map_rect())
+        if entry[0] == "_fog_of_war"
+    )
+    pygame.event.clear()
+    pygame.event.post(
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            button=1,
+            pos=fog_button.center,
+        )
+    )
+
+    window._handle_events()
+
+    assert window._fog_of_war
+    assert window.tabs.active == "GALAXY"
 
 
 def test_galaxy_map_layers_render_and_fog_hides_unexplored_systems(
@@ -265,6 +292,57 @@ def test_main_menu_renders_portraits_and_starts_selected_species(
 
     assert not window._menu_active
     assert window.application.campaign.player_species_id == "auralith"
+
+
+def test_diplomacy_screen_explains_first_contact_and_offers_actions(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    campaign = window.application.campaign
+    assert window.tabs is not None
+    assert window.dropdown is not None
+    assert window.diplomatic_action is not None
+    window.tabs.active = "DIPLOMACY"
+    window._filter_content()
+    assert window.dropdown.rect.height > 1
+    assert window.diplomatic_action.rect.height > 1
+    assert window.action_button is not None
+    assert window.action_button.rect.height > 1
+    window._draw_diplomacy(window.ui.fonts.get(14))
+
+    assert window.diplomatic_action.options == [
+        "First contact pending - survey their space"
+    ]
+    campaign.perform_action("morrow")
+    window._draw_diplomacy(window.ui.fonts.get(14))
+
+    assert "Send envoy" in window.diplomatic_action.options
+    assert "Propose non-aggression pact" in window.diplomatic_action.options
+    window.diplomatic_action.selected = "Propose non-aggression pact"
+    window._perform_diplomatic_action()
+    assert "non_aggression" in campaign.get_relation("veyra").treaties
+
+
+def test_campaign_news_reaches_the_player_without_duplicate_action_alerts(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    campaign = window.application.campaign
+
+    campaign.perform_action("morrow")
+    expected_messages = {
+        event.split("  ", 1)[-1]
+        for event in campaign.log[-2:]
+    }
+    window.ui.notify(campaign.log[-1].split("  ", 1)[-1])
+    window._poll_campaign_news()
+    assert {
+        notification.message
+        for notification in window.ui.notifications
+    } == expected_messages
+
+    window._poll_campaign_news()
+    assert len(window.ui.notifications) == 2
 
 
 def test_planet_management_and_history_keyboard_controls(

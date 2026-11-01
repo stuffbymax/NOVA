@@ -10,6 +10,8 @@ from nova.persistence import SaveError, load_campaign, save_campaign
 def test_save_round_trip_preserves_campaign_state(tmp_path: Path) -> None:
     campaign = Campaign(seed=374)
     campaign.perform_action("asterion")
+    campaign.perform_action("morrow")
+    campaign.propose_treaty("veyra", "non_aggression")
     campaign.start_research("field-survey")
     campaign.move_fleet("frontier-survey-group", "asterion")
     campaign.advance(12)
@@ -29,6 +31,9 @@ def test_save_round_trip_preserves_campaign_state(tmp_path: Path) -> None:
     assert loaded.active_technology == campaign.active_technology
     assert loaded.research_progress == campaign.research_progress
     assert loaded.fleets[0].route == campaign.fleets[0].route
+    assert loaded.ai_fleets[0].ship_count == campaign.ai_fleets[0].ship_count
+    assert loaded.get_relation("veyra").first_contact
+    assert loaded.get_relation("veyra").treaties == ["non_aggression"]
     assert loaded.colony_states.keys() == campaign.colony_states.keys()
     assert loaded.map_bookmarks == ["asterion"]
 
@@ -57,3 +62,15 @@ def test_save_rejects_unsupported_versions(tmp_path: Path) -> None:
 
     with pytest.raises(SaveError, match="Unsupported campaign version"):
         load_campaign(target)
+
+
+def test_campaign_loader_migrates_v1_saves_to_default_diplomacy() -> None:
+    payload = Campaign().to_dict()
+    payload["schema_version"] = 1
+    payload.pop("ai_fleets")
+    payload.pop("diplomacy")
+
+    migrated = Campaign.from_dict(payload)
+
+    assert migrated.ai_fleets
+    assert not migrated.get_relation("veyra").first_contact

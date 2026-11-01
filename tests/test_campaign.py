@@ -183,6 +183,134 @@ def test_ai_empire_expands_deterministically() -> None:
     assert first.ai_empires[0].system_ids == second.ai_empires[0].system_ids
 
 
+def test_surveying_rival_space_establishes_first_contact() -> None:
+    campaign = Campaign()
+    relation = campaign.get_relation("veyra")
+
+    message = campaign.perform_action("morrow")
+
+    assert relation.first_contact
+    assert "First contact established" in message
+    assert relation.opinion == 0
+
+
+def test_diplomatic_pacts_change_opinion_and_production() -> None:
+    campaign = Campaign()
+    campaign.perform_action("morrow")
+    relation = campaign.get_relation("veyra")
+    initial_energy = campaign.energy
+
+    campaign.propose_treaty("veyra", "non_aggression")
+    assert "non_aggression" in relation.treaties
+    campaign.propose_treaty("veyra", "trade")
+    campaign.propose_treaty("veyra", "research")
+    campaign.advance(10)
+
+    assert relation.opinion == 15
+    assert campaign.energy > initial_energy
+    assert campaign.research_points > 0
+
+
+def test_treaty_requires_contact_and_prerequisites() -> None:
+    campaign = Campaign()
+
+    with pytest.raises(ValueError, match="First contact"):
+        campaign.propose_treaty("veyra", "trade")
+    campaign.perform_action("morrow")
+    with pytest.raises(ValueError, match="non-aggression pact is required"):
+        campaign.propose_treaty("veyra", "defensive_alliance")
+
+
+def test_envoy_improves_opinion_with_influence_and_has_cooldown() -> None:
+    campaign = Campaign()
+    campaign.perform_action("morrow")
+    initial_influence = campaign.influence
+
+    campaign.send_envoy("veyra")
+
+    assert campaign.influence == initial_influence - 1
+    assert campaign.get_relation("veyra").opinion == 15
+    with pytest.raises(ValueError, match="once per year"):
+        campaign.send_envoy("veyra")
+
+
+def test_active_agreements_must_be_broken_before_war() -> None:
+    campaign = Campaign()
+    campaign.perform_action("morrow")
+    campaign.propose_treaty("veyra", "non_aggression")
+
+    with pytest.raises(ValueError, match="Break active treaties"):
+        campaign.declare_war("veyra")
+    campaign.break_treaty("veyra", "non_aggression")
+
+    assert campaign.declare_war("veyra").endswith("declared war on the Veyran Compact.")
+
+
+def test_war_requires_contact_and_fleet_moves_capture_hostile_systems() -> None:
+    campaign = Campaign()
+    with pytest.raises(ValueError, match="First contact"):
+        campaign.declare_war("veyra")
+    campaign.perform_action("morrow")
+    campaign.alloys = 100
+    first = campaign.fleets[0]
+    second = campaign.create_fleet("Second Squadron")
+    campaign.declare_war("veyra")
+    campaign.move_fleet(first.fleet_id, "morrow")
+    campaign.move_fleet(second.fleet_id, "morrow")
+    travel_days = max(
+        sum(
+            campaign._jump_duration(start, destination)
+            for start, destination in zip(
+                [fleet.system_id, *fleet.route[:-1]],
+                fleet.route,
+            )
+        )
+        for fleet in (first, second)
+    )
+
+    campaign.advance(travel_days + 1)
+
+    assert campaign.get_system("morrow").owner == "Union"
+    assert any("Battle of Morrow" in event for event in campaign.log)
+    assert len(campaign.ai_empires[0].system_ids) == 0
+    assert first.ship_count > 0 or second.ship_count > 0
+
+
+def test_rival_fleet_retaliates_during_war() -> None:
+    campaign = Campaign()
+    campaign.perform_action("morrow")
+    campaign.declare_war("veyra")
+
+    campaign.advance(1)
+
+    assert campaign.ai_fleets[0].route
+    assert campaign.ai_fleets[0].destination_id in {
+        system.system_id
+        for system in campaign.systems
+        if system.owner == "Union"
+    }
+
+
+def test_war_can_end_with_peace_after_system_is_captured() -> None:
+    campaign = Campaign()
+    campaign.perform_action("morrow")
+    campaign.alloys = 100
+    fleet = campaign.fleets[0]
+    campaign.create_fleet("Second Squadron")
+    campaign.declare_war("veyra")
+    campaign.move_fleet(fleet.fleet_id, "morrow")
+    relation = campaign.get_relation("veyra")
+    message = campaign.negotiate_peace("veyra")
+
+    assert "rejected" in message
+    assert relation.at_war
+    campaign.elapsed_days = 200
+    message = campaign.negotiate_peace("veyra")
+
+    assert "ceasefire" in message
+    assert not relation.at_war
+
+
 def test_each_system_contains_multiple_individual_objects() -> None:
     campaign = Campaign()
 

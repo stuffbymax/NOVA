@@ -168,7 +168,12 @@ class TabBar:
             active = tab == self.active
             pygame.draw.rect(surface, theme.accent if active else theme.panel_alt, rect)
             color = theme.background if active else theme.text
-            label = font.render(tab, True, color)
+            label_text = {
+                "GALAXY": "MAP",
+                "DIPLOMACY": "DIPLO",
+                "CHRONICLE": "LOG",
+            }.get(tab, tab)
+            label = font.render(label_text, True, color)
             surface.blit(label, label.get_rect(center=rect.center))
         if self.focused:
             pygame.draw.rect(surface, theme.warning, self.rect, 2)

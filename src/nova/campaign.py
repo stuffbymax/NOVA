@@ -29,6 +29,7 @@ class Fleet:
     ship_count: int = 3
     route: list[str] = field(default_factory=list)
     days_to_arrival: float = 0.0
+    owner_id: str = "union"
 
     @property
     def destination_id(self) -> str | None:
@@ -54,6 +55,18 @@ class AIEmpire:
     species_id: str
     system_ids: list[str]
     next_expansion_day: float = 365.0
+
+
+@dataclass
+class DiplomaticRelation:
+    empire_id: str
+    opinion: int = -5
+    trust: int = 0
+    first_contact: bool = False
+    treaties: list[str] = field(default_factory=list)
+    at_war: bool = False
+    war_started_day: float | None = None
+    last_envoy_day: float = -365.0
 
 
 class Campaign:
@@ -111,6 +124,19 @@ class Campaign:
         self.ai_empires = [
             AIEmpire("veyra", "Veyran Compact", "veyra", ["morrow"])
         ]
+        self.ai_fleets = [
+            Fleet(
+                "veyra-defense",
+                "Veyran Defense Fleet",
+                "morrow",
+                ship_count=3,
+                owner_id="veyra",
+            )
+        ]
+        self.diplomacy = {
+            empire.empire_id: DiplomaticRelation(empire.empire_id)
+            for empire in self.ai_empires
+        }
         self.log = [
             "2480.01  The frontier is open. Survey the unknown systems.",
             "2480.01  Union scouts report an ancient signal at Eidolon.",
@@ -174,6 +200,22 @@ class Campaign:
             for colony in self.colony_states.values()
             if self.get_system(colony.system_id).owner == "Union"
         ]
+
+    @property
+    def all_fleets(self) -> list[Fleet]:
+        return [*self.fleets, *self.ai_fleets]
+
+    def get_empire(self, empire_id: str) -> AIEmpire:
+        for empire in self.ai_empires:
+            if empire.empire_id == empire_id:
+                return empire
+        raise KeyError(f"Unknown empire: {empire_id}")
+
+    def get_relation(self, empire_id: str) -> DiplomaticRelation:
+        try:
+            return self.diplomacy[empire_id]
+        except KeyError as error:
+            raise KeyError(f"Unknown diplomatic relationship: {empire_id}") from error
 
     @staticmethod
     def colony_key(system_id: str, planet_id: str) -> str:
@@ -265,6 +307,7 @@ class Campaign:
             self.science -= self.SURVEY_SCIENCE_COST
             system_object.surveyed = True
             system.surveyed = True
+            first_contact = self._establish_contacts_in_system(system)
             if system_object.is_planet or system_object.kind == "Moon":
                 self._record_planet_history(
                     system_object,
@@ -281,6 +324,8 @@ class Campaign:
                     f"Survey complete: {system_object.name} in {system.name} - "
                     f"{system_object.description}{recovered}"
                 )
+            if first_contact:
+                message += f" {first_contact}"
             self._record(message)
             return message
         if system_object.gateway and not self.gateway_studied:
@@ -375,6 +420,154 @@ class Campaign:
         self._record(f"Research begun: {definition.name}.")
         return f"Research begun: {definition.name}."
 
+    def establish_first_contact(self, empire_id: str) -> str:
+        empire = self.get_empire(empire_id)
+        relation = self.get_relation(empire_id)
+        if relation.first_contact:
+            raise ValueError(f"First contact with {empire.name} is already established")
+        if not any(self.get_system(system_id).surveyed for system_id in empire.system_ids):
+            raise ValueError(f"Survey a {empire.name} system to establish first contact")
+        relation.first_contact = True
+        relation.opinion = 0
+        message = f"First contact established with the {empire.name}."
+        self._record(message)
+        return message
+
+    def _establish_contacts_in_system(self, system: StarSystem) -> str:
+        for empire in self.ai_empires:
+            if system.system_id in empire.system_ids:
+                relation = self.get_relation(empire.empire_id)
+                if not relation.first_contact:
+                    return self.establish_first_contact(empire.empire_id)
+        return ""
+
+    def send_envoy(self, empire_id: str) -> str:
+        empire = self.get_empire(empire_id)
+        relation = self.get_relation(empire_id)
+        self._require_contact(empire, relation)
+        if self.elapsed_days - relation.last_envoy_day < 365:
+            raise ValueError("An envoy can improve relations once per year")
+        if relation.at_war:
+            raise ValueError("Envoys cannot improve relations during a war")
+        if self.influence < 1:
+            raise ValueError("Not enough influence to send an envoy")
+        self.influence -= 1
+        relation.last_envoy_day = self.elapsed_days
+        relation.opinion = min(100, relation.opinion + 15)
+        relation.trust = min(100, relation.trust + 5)
+        message = (
+            f"Envoy mission improved relations with the {empire.name} "
+            f"(opinion {relation.opinion:+d})."
+        )
+        self._record(message)
+        return message
+
+    def propose_treaty(self, empire_id: str, treaty_id: str) -> str:
+        empire = self.get_empire(empire_id)
+        relation = self.get_relation(empire_id)
+        self._require_contact(empire, relation)
+        if relation.at_war:
+            raise ValueError("A treaty cannot be proposed during a war")
+        requirements = {
+            "non_aggression": (1, -10, ()),
+            "trade": (2, 5, ()),
+            "research": (2, 10, ()),
+            "defensive_alliance": (3, 35, ("non_aggression",)),
+        }
+        try:
+            cost, minimum_opinion, prerequisites = requirements[treaty_id]
+        except KeyError as error:
+            raise ValueError(f"Unknown diplomatic treaty: {treaty_id}") from error
+        if treaty_id in relation.treaties:
+            raise ValueError("This treaty is already active")
+        if not set(prerequisites).issubset(relation.treaties):
+            raise ValueError("A non-aggression pact is required for a defensive alliance")
+        if self.influence < cost:
+            raise ValueError("Not enough influence to propose this treaty")
+        self.influence -= cost
+        treaty_names = {
+            "non_aggression": "Non-aggression pact",
+            "trade": "Trade agreement",
+            "research": "Research agreement",
+            "defensive_alliance": "Defensive alliance",
+        }
+        treaty_name = treaty_names[treaty_id]
+        if relation.opinion < minimum_opinion:
+            relation.opinion = max(-100, relation.opinion - 5)
+            message = (
+                f"The {empire.name} rejected the {treaty_name} "
+                f"(opinion {relation.opinion:+d})."
+            )
+        else:
+            relation.treaties.append(treaty_id)
+            relation.opinion = min(100, relation.opinion + 5)
+            relation.trust = min(100, relation.trust + 8)
+            message = f"The {empire.name} accepted the {treaty_name}."
+        self._record(message)
+        return message
+
+    def declare_war(self, empire_id: str) -> str:
+        empire = self.get_empire(empire_id)
+        relation = self.get_relation(empire_id)
+        self._require_contact(empire, relation)
+        if relation.at_war:
+            raise ValueError(f"The Union is already at war with the {empire.name}")
+        if relation.treaties:
+            raise ValueError("Break active treaties before declaring war")
+        if self.influence < 4:
+            raise ValueError("Not enough influence to declare war")
+        self.influence -= 4
+        relation.at_war = True
+        relation.war_started_day = self.elapsed_days
+        relation.opinion = max(-100, relation.opinion - 50)
+        message = f"The Union has declared war on the {empire.name}."
+        self._record(message)
+        return message
+
+    def break_treaty(self, empire_id: str, treaty_id: str) -> str:
+        empire = self.get_empire(empire_id)
+        relation = self.get_relation(empire_id)
+        self._require_contact(empire, relation)
+        if treaty_id not in relation.treaties:
+            raise ValueError("This treaty is not active")
+        relation.treaties.remove(treaty_id)
+        relation.opinion = max(-100, relation.opinion - 20)
+        relation.trust = max(0, relation.trust - 15)
+        treaty_name = treaty_id.replace("_", " ")
+        message = f"The Union broke its {treaty_name} with the {empire.name}."
+        self._record(message)
+        return message
+
+    def negotiate_peace(self, empire_id: str) -> str:
+        empire = self.get_empire(empire_id)
+        relation = self.get_relation(empire_id)
+        self._require_contact(empire, relation)
+        if not relation.at_war or relation.war_started_day is None:
+            raise ValueError("There is no active war to resolve")
+        held_systems = sum(
+            self.get_system(system_id).owner == "Union"
+            for system_id in empire.system_ids
+        )
+        war_days = self.elapsed_days - relation.war_started_day
+        if held_systems == 0 and empire.system_ids and war_days < 180:
+            self._record(f"The {empire.name} rejected a premature peace offer.")
+            return f"The {empire.name} rejected the peace offer. Continue the war or wait."
+        relation.at_war = False
+        relation.war_started_day = None
+        relation.treaties.clear()
+        relation.opinion = max(-100, min(100, relation.opinion + 25))
+        message = f"A ceasefire with the {empire.name} has ended hostilities."
+        self._record(message)
+        return message
+
+    def _require_contact(
+        self,
+        empire: AIEmpire,
+        relation: DiplomaticRelation,
+    ) -> None:
+        if not relation.first_contact:
+            raise ValueError(f"First contact with the {empire.name} is required")
+
     def create_fleet(self, name: str = "Frontier Squadron") -> Fleet:
         cost = 35.0
         if self.alloys < cost:
@@ -398,7 +591,15 @@ class Campaign:
             raise ValueError("Fleet is already at that system")
         if fleet.route:
             raise ValueError(f"{fleet.name} is already in transit")
-        route = self._find_route(fleet.system_id, target_system_id)
+        destination_owner = self.get_system(target_system_id).owner
+        if destination_owner not in (None, "Union"):
+            empire = next(
+                (item for item in self.ai_empires if item.name == destination_owner),
+                None,
+            )
+            if empire is None or not self.get_relation(empire.empire_id).at_war:
+                raise ValueError(f"Declare war before sending fleets into {destination_owner} territory")
+        route = self._find_route(fleet.system_id, target_system_id, fleet.owner_id)
         if not route:
             raise ValueError(f"No navigable route to {target_system_id}")
         fleet.route = route
@@ -407,7 +608,12 @@ class Campaign:
         self._record(message)
         return message
 
-    def _find_route(self, start: str, goal: str) -> list[str]:
+    def _find_route(
+        self,
+        start: str,
+        goal: str,
+        owner_id: str = "union",
+    ) -> list[str]:
         neighbors: dict[str, list[str]] = {}
         for first, second in self.routes:
             neighbors.setdefault(first, []).append(second)
@@ -419,10 +625,34 @@ class Campaign:
             if current == goal:
                 return path
             for neighbor in sorted(neighbors.get(current, [])):
+                if not self._can_transit(owner_id, neighbor):
+                    continue
                 if neighbor not in visited:
                     visited.add(neighbor)
                     queue.append((neighbor, [*path, neighbor]))
         return []
+
+    def _can_transit(self, owner_id: str, system_id: str) -> bool:
+        owner = "Union" if owner_id == "union" else self.get_empire(owner_id).name
+        system = self.get_system(system_id)
+        if system.owner is None or system.owner == owner:
+            return True
+        if system.owner == "Union":
+            relation = self.diplomacy.get(owner_id)
+            return bool(
+                owner_id == "union"
+                or (relation is not None and relation.at_war)
+            )
+        empire = next(
+            (item for item in self.ai_empires if item.name == system.owner),
+            None,
+        )
+        if empire is None:
+            return False
+        return (
+            system.owner == empire.name
+            and self.get_relation(empire.empire_id).at_war
+        )
 
     def _jump_duration(self, first_id: str, second_id: str) -> float:
         first = self.get_system(first_id)
@@ -461,6 +691,16 @@ class Campaign:
         }
         energy_upkeep = 0.0
         research_rate = 0.025
+        trade_bonus = sum(
+            "trade" in relation.treaties and relation.first_contact
+            for relation in self.diplomacy.values()
+        ) * 0.08
+        research_bonus = sum(
+            "research" in relation.treaties and relation.first_contact
+            for relation in self.diplomacy.values()
+        ) * 0.08
+        production["energy"] += trade_bonus
+        research_rate += research_bonus
         for colony in self.colony_states.values():
             system = self.get_system(colony.system_id)
             if system.owner == "Union":
@@ -545,23 +785,192 @@ class Campaign:
             self.research_progress = 0.0
 
     def _advance_fleets(self, delta: float) -> None:
-        for fleet in self.fleets:
+        for fleet in tuple(self.all_fleets):
+            if fleet.ship_count <= 0:
+                continue
             remaining = delta
             while fleet.route and remaining >= fleet.days_to_arrival:
                 remaining -= fleet.days_to_arrival
                 previous = fleet.system_id
                 fleet.system_id = fleet.route.pop(0)
-                self._record(f"{fleet.name} arrived in {self.get_system(fleet.system_id).name}.")
+                system = self.get_system(fleet.system_id)
+                self._record(f"{fleet.name} arrived in {system.name}.")
+                if self._is_hostile_system(fleet.owner_id, system):
+                    self._resolve_battle(fleet, system, previous)
+                    if not fleet.route:
+                        remaining = 0.0
+                        break
                 if fleet.route:
-                    fleet.days_to_arrival = self._jump_duration(previous, fleet.system_id)
+                    fleet.days_to_arrival = self._jump_duration(
+                        fleet.system_id,
+                        fleet.route[0],
+                    )
                 else:
                     fleet.days_to_arrival = 0.0
             if fleet.route:
                 fleet.days_to_arrival = max(0.0, fleet.days_to_arrival - remaining)
+        self.fleets = [fleet for fleet in self.fleets if fleet.ship_count > 0]
+        self.ai_fleets = [fleet for fleet in self.ai_fleets if fleet.ship_count > 0]
+
+    def _is_hostile_system(self, owner_id: str, system: StarSystem) -> bool:
+        if owner_id == "union":
+            empire = next(
+                (entry for entry in self.ai_empires if entry.name == system.owner),
+                None,
+            )
+            return bool(
+                empire is not None
+                and self.get_relation(empire.empire_id).at_war
+            )
+        empire = self.get_empire(owner_id)
+        return (
+            system.owner == "Union"
+            and self.get_relation(empire.empire_id).at_war
+        )
+
+    def _resolve_battle(
+        self,
+        attacker: Fleet,
+        system: StarSystem,
+        previous_system_id: str,
+    ) -> None:
+        owner_id = attacker.owner_id
+        defender_owner = "union" if system.owner == "Union" else next(
+            (
+                empire.empire_id
+                for empire in self.ai_empires
+                if empire.name == system.owner
+            ),
+            None,
+        )
+        if defender_owner is None:
+            return
+        relation_id = defender_owner if owner_id == "union" else owner_id
+        relation = self.get_relation(relation_id)
+        if not relation.at_war:
+            return
+        defenders = [
+            fleet
+            for fleet in self.all_fleets
+            if fleet.owner_id == defender_owner
+            and fleet.system_id == system.system_id
+            and fleet.ship_count > 0
+        ]
+        defense_strength = sum(fleet.ship_count for fleet in defenders) + 1
+        attack_strength = attacker.ship_count
+        attacker_wins = attack_strength > defense_strength
+        if attacker_wins:
+            attacker_losses = min(
+                attacker.ship_count - 1,
+                max(1, math.ceil(defense_strength * 0.35)),
+            )
+            defender_losses = defense_strength
+        else:
+            attacker_losses = attacker.ship_count
+            defender_losses = min(
+                defense_strength - 1,
+                max(1, math.ceil(attack_strength * 0.4)),
+            )
+        attacker.ship_count -= attacker_losses
+        remaining_defender_losses = defender_losses
+        for fleet in defenders:
+            losses = min(fleet.ship_count, remaining_defender_losses)
+            fleet.ship_count -= losses
+            remaining_defender_losses -= losses
+        result = "won" if attacker_wins else "lost"
+        self._record(
+            f"Battle of {system.name}: {attacker.name} {result}; "
+            f"{attacker_losses} attacking and {defender_losses} defending ships lost."
+        )
+        if attacker_wins:
+            self._capture_system(system, owner_id)
+            relation.opinion = max(-100, relation.opinion - 10)
+            return
+        if attacker.ship_count:
+            attacker.route = [previous_system_id]
+            attacker.days_to_arrival = self._jump_duration(
+                system.system_id,
+                previous_system_id,
+            )
+
+    def _capture_system(self, system: StarSystem, owner_id: str) -> None:
+        previous_owner = system.owner
+        if owner_id == "union":
+            system.owner = "Union"
+            for planet in system.planets:
+                if planet.colonized:
+                    planet.owner = "Union"
+            self._record(f"Union forces secured {system.name}.")
+        else:
+            empire = self.get_empire(owner_id)
+            system.owner = empire.name
+            for planet in system.planets:
+                if planet.colonized:
+                    planet.owner = empire.name
+            self._record(f"{empire.name} forces secured {system.name}.")
+        if previous_owner == "Union" and owner_id != "union":
+            for colony in self.colony_states.values():
+                if colony.system_id == system.system_id:
+                    colony.happiness = max(0.0, colony.happiness - 0.25)
+        if previous_owner not in (None, "Union"):
+            previous_empire = next(
+                (
+                    empire
+                    for empire in self.ai_empires
+                    if empire.name == previous_owner
+                ),
+                None,
+            )
+            if previous_empire is not None and owner_id == "union":
+                previous_empire.system_ids = [
+                    item
+                    for item in previous_empire.system_ids
+                    if item != system.system_id
+                ]
+        if owner_id != "union":
+            empire = self.get_empire(owner_id)
+            if system.system_id not in empire.system_ids:
+                empire.system_ids.append(system.system_id)
 
     def _advance_ai(self) -> None:
         for empire in self.ai_empires:
-            while self.elapsed_days >= empire.next_expansion_day:
+            relation = self.get_relation(empire.empire_id)
+            if relation.at_war:
+                for fleet in self.ai_fleets:
+                    if fleet.owner_id != empire.empire_id or fleet.route:
+                        continue
+                    targets = [
+                        system
+                        for system in self.systems
+                        if system.owner == "Union"
+                    ]
+                    if not targets:
+                        continue
+                    target = min(
+                        targets,
+                        key=lambda system: math.hypot(
+                            system.x - self.get_system(fleet.system_id).x,
+                            system.y - self.get_system(fleet.system_id).y,
+                        ),
+                    )
+                    route = self._find_route(
+                        fleet.system_id,
+                        target.system_id,
+                        fleet.owner_id,
+                    )
+                    if route:
+                        fleet.route = route
+                        fleet.days_to_arrival = self._jump_duration(
+                            fleet.system_id,
+                            route[0],
+                        )
+                        self._record(
+                            f"{empire.name} forces are advancing on {target.name}."
+                        )
+            while (
+                empire.system_ids
+                and self.elapsed_days >= empire.next_expansion_day
+            ):
                 candidates = [
                     (system, planet)
                     for system in self.systems
@@ -638,7 +1047,7 @@ class Campaign:
     def to_dict(self) -> dict[str, object]:
         """Return a complete JSON-compatible snapshot of the campaign."""
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "galaxy": asdict(self.galaxy),
             "player_species_id": self.player_species_id,
             "elapsed_days": self.elapsed_days,
@@ -656,7 +1065,12 @@ class Campaign:
             "map_bookmarks": list(self.map_bookmarks),
             "colonies": [asdict(colony) for colony in self.colony_states.values()],
             "fleets": [asdict(fleet) for fleet in self.fleets],
+            "ai_fleets": [asdict(fleet) for fleet in self.ai_fleets],
             "ai_empires": [asdict(empire) for empire in self.ai_empires],
+            "diplomacy": {
+                empire_id: asdict(relation)
+                for empire_id, relation in self.diplomacy.items()
+            },
             "log": list(self.log),
         }
 
@@ -666,7 +1080,8 @@ class Campaign:
         data: dict[str, object],
         content_path: Path | None = None,
     ) -> "Campaign":
-        if data.get("schema_version") != 1:
+        version = data.get("schema_version")
+        if version not in (1, 2):
             raise ValueError(f"Unsupported campaign version: {data.get('schema_version')}")
         galaxy_data = data.get("galaxy")
         if not isinstance(galaxy_data, dict):
@@ -712,10 +1127,18 @@ class Campaign:
                 Fleet(**fleet_data)
                 for fleet_data in data["fleets"]
             ]
+            ai_fleets = [
+                Fleet(**fleet_data)
+                for fleet_data in data.get("ai_fleets", [])
+            ]
             ai_empires = [
                 AIEmpire(**empire_data)
                 for empire_data in data["ai_empires"]
             ]
+            diplomacy = {
+                empire_id: DiplomaticRelation(**relation_data)
+                for empire_id, relation_data in data.get("diplomacy", {}).items()
+            }
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("Save contains invalid campaign data") from error
 
@@ -747,11 +1170,12 @@ class Campaign:
             tuple(sorted(route))
             for route in galaxy.routes
         }
-        for fleet in fleets:
+        for fleet in [*fleets, *ai_fleets]:
             route = [fleet.system_id, *fleet.route]
             if (
                 fleet.system_id not in system_ids
                 or fleet.ship_count <= 0
+                or fleet.owner_id not in {"union", *(empire.empire_id for empire in ai_empires)}
                 or fleet.days_to_arrival < 0
                 or not math.isfinite(fleet.days_to_arrival)
                 or any(item not in system_ids for item in fleet.route)
@@ -769,6 +1193,34 @@ class Campaign:
                 or empire.next_expansion_day < 0
             ):
                 raise ValueError("Save contains an invalid AI empire")
+        if version == 1 and not ai_fleets:
+            ai_fleets = campaign.ai_fleets
+        if version == 1 and not diplomacy:
+            diplomacy = campaign.diplomacy
+        if set(diplomacy) != {empire.empire_id for empire in ai_empires}:
+            raise ValueError("Save contains invalid diplomatic relationships")
+        known_treaties = {
+            "non_aggression",
+            "trade",
+            "research",
+            "defensive_alliance",
+        }
+        for relation in diplomacy.values():
+            if (
+                any(treaty not in known_treaties for treaty in relation.treaties)
+                or len(set(relation.treaties)) != len(relation.treaties)
+                or not -100 <= relation.opinion <= 100
+                or not 0 <= relation.trust <= 100
+                or (
+                    relation.at_war
+                    and relation.war_started_day is None
+                )
+                or (
+                    relation.war_started_day is not None
+                    and not 0 <= relation.war_started_day <= float(data["elapsed_days"])
+                )
+            ):
+                raise ValueError("Save contains an invalid diplomatic relationship")
         numeric_state = (
             float(data["elapsed_days"]),
             float(data["alloys"]),
@@ -815,7 +1267,9 @@ class Campaign:
             for colony in colonies
         }
         campaign.fleets = fleets
+        campaign.ai_fleets = ai_fleets
         campaign.ai_empires = ai_empires
+        campaign.diplomacy = diplomacy
         campaign.log = list(data["log"])
         campaign._refresh_population_labels()
         return campaign
@@ -827,10 +1281,13 @@ class Campaign:
         self.science += 6
         self.alloys += 5
         system.surveyed = True
+        first_contact = self._establish_contacts_in_system(system)
         message = (
             f"Survey complete: {system.name} - {system.world_type} identified. "
             "Survey teams recovered research and alloys."
         )
+        if first_contact:
+            message += f" {first_contact}"
         self._record(message)
         return message
 
