@@ -7,7 +7,7 @@ import pygame
 
 from .application import Application
 from .assets import AssetError, AssetManager
-from .campaign import SystemObject
+from .campaign import StarSystem, SystemObject
 from .config import Config
 from .ui import (
     Button,
@@ -30,6 +30,8 @@ class GameWindow:
     """Owns pygame resources and translates input into campaign actions."""
 
     _SPEEDS = (0.5, 1.0, 2.0, 4.0)
+    _GALAXY_ZOOM_MIN = 0.35
+    _GALAXY_ZOOM_MAX = 1.5
 
     def __init__(self, application: Application, config: Config) -> None:
         self.application = application
@@ -44,10 +46,13 @@ class GameWindow:
         self._selected_system = "sol"
         self._selected_object = "earth"
         self._active_tab = "GALAXY"
-        self._galaxy_zoom = 1.02
+        self._galaxy_zoom = 0.9
         self._system_zoom = 0.92
         self._map_pan = pygame.Vector2()
         self._map_dragging = False
+        self._nebula_cache: dict[
+            tuple[tuple[int, int], tuple[int, int, int]], pygame.Surface
+        ] = {}
         self._bounds = pygame.Rect(0, 0, config.window_width, config.window_height)
         self.ui = UIManager(Theme())
         self.windows = WindowManager(self._bounds)
@@ -106,12 +111,18 @@ class GameWindow:
                 )
                 self._update_bounds()
                 self._layout_ui()
+                self._clamp_map_pan()
+                self._nebula_cache.clear()
                 continue
             if self.ui.modal is not None:
                 self.ui.handle_event(event, self._widgets)
                 continue
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-                if self._map_rect().collidepoint(event.pos):
+                if (
+                    self.tabs is not None
+                    and self.tabs.active == "GALAXY"
+                    and self._map_rect().collidepoint(event.pos)
+                ):
                     self._map_dragging = True
                     continue
             if event.type == pygame.MOUSEBUTTONUP and event.button == 3:
@@ -120,16 +131,14 @@ class GameWindow:
             if event.type == pygame.MOUSEMOTION and self._map_dragging:
                 if event.buttons[2]:
                     self._map_pan += pygame.Vector2(event.rel)
+                    self._clamp_map_pan()
                     continue
                 self._map_dragging = False
             if event.type == pygame.MOUSEWHEEL:
                 mouse_position = getattr(event, "pos", pygame.mouse.get_pos())
                 if self._map_rect().collidepoint(mouse_position):
                     if self.tabs is not None and self.tabs.active == "GALAXY":
-                        self._galaxy_zoom = min(
-                            1.5,
-                            max(0.35, self._galaxy_zoom + event.y * 0.08),
-                        )
+                        self._zoom_galaxy_map(event.y * 0.08, mouse_position)
                     else:
                         self._system_zoom = min(
                             1.35,
@@ -145,6 +154,17 @@ class GameWindow:
                     continue
                 if event.key == pygame.K_F1:
                     self._toggle_contrast()
+                    continue
+                if (
+                    event.key == pygame.K_HOME
+                    and self.tabs is not None
+                    and not self._text_input_focused()
+                ):
+                    if self.tabs.active == "GALAXY":
+                        self._galaxy_zoom = 0.9
+                        self._map_pan.update(0, 0)
+                    else:
+                        self._system_zoom = 0.92
                     continue
                 if event.key == pygame.K_TAB:
                     self.ui.handle_event(event, self._widgets)
@@ -282,15 +302,24 @@ class GameWindow:
         ):
             button.draw(self.screen, small_font, theme)
 
-        map_target = "body" if self.tabs.active == "SYSTEM" else "star"
-        help_text = (
-            f"Click {map_target}  |  wheel zoom  |  SPACE pause"
-            if self._map_rect().width < 500
-            else (
-                f"Click a {map_target} to inspect  |  wheel zoom  |  "
-                "right-drag pan  |  TAB / ENTER to navigate  |  SPACE pause"
+        if self.tabs.active == "SYSTEM":
+            help_text = (
+                "Click body  |  wheel zoom  |  BACKSPACE galaxy"
+                if width < 900
+                else (
+                    "Click a body to inspect  |  wheel zoom  |  "
+                    "BACKSPACE galaxy  |  SPACE pause"
+                )
             )
-        )
+        else:
+            help_text = (
+                "Select star  |  wheel zoom  |  HOME reset"
+                if width < 900
+                else (
+                    "Click a star to inspect  |  wheel zoom  |  "
+                    "right-drag pan when zoomed  |  HOME reset  |  SPACE pause"
+                )
+            )
         help_font = self.ui.fonts.get(13) if width < 900 else small_font
         self._label(help_text, (18, height - 22), help_font, theme.muted)
         self.ui.draw_overlays(self.screen, small_font, small_font)
@@ -655,20 +684,50 @@ class GameWindow:
         )
 
     def _map_position(self, system_id: str) -> tuple[int, int]:
-        bounds = self._map_rect()
         system = self.application.campaign.get_system(system_id)
+        return self._galaxy_position(system.x, system.y)
+
+    def _galaxy_position(self, x: float, y: float) -> tuple[int, int]:
+        bounds = self._map_rect()
         return (
             round(
                 bounds.centerx
-                + (system.x - 0.5) * bounds.width * self._galaxy_zoom
+                + (x - 0.5) * bounds.width * self._galaxy_zoom
                 + self._map_pan.x
             ),
             round(
                 bounds.centery
-                + (system.y - 0.5) * bounds.height * self._galaxy_zoom
+                + (y - 0.5) * bounds.height * self._galaxy_zoom
                 + self._map_pan.y
             ),
         )
+
+    def _zoom_galaxy_map(
+        self,
+        amount: float,
+        anchor: tuple[int, int],
+    ) -> None:
+        old_zoom = self._galaxy_zoom
+        new_zoom = min(
+            self._GALAXY_ZOOM_MAX,
+            max(self._GALAXY_ZOOM_MIN, old_zoom + amount),
+        )
+        if new_zoom == old_zoom:
+            return
+        bounds = self._map_rect()
+        anchor_offset = pygame.Vector2(anchor) - pygame.Vector2(bounds.center)
+        world_offset = (anchor_offset - self._map_pan) / old_zoom
+        self._galaxy_zoom = new_zoom
+        self._map_pan = anchor_offset - world_offset * new_zoom
+        self._clamp_map_pan()
+
+    def _clamp_map_pan(self) -> None:
+        bounds = self._map_rect()
+        pan_limit = (1.0 - self._GALAXY_ZOOM_MIN) / 2
+        max_x = bounds.width * pan_limit
+        max_y = bounds.height * pan_limit
+        self._map_pan.x = min(max_x, max(-max_x, self._map_pan.x))
+        self._map_pan.y = min(max_y, max(-max_y, self._map_pan.y))
 
     def _select_map_item(self, position: tuple[int, int]) -> bool:
         if self.tabs is not None and self.tabs.active == "SYSTEM":
@@ -705,44 +764,75 @@ class GameWindow:
         theme = self.ui.theme
         previous_clip = self.screen.get_clip()
         self.screen.set_clip(bounds)
-        for nebula in campaign.galaxy.nebulae:
-            position = (
-                round(
-                    bounds.centerx
-                    + (nebula.x - 0.5) * bounds.width * self._galaxy_zoom
-                    + self._map_pan.x
-                ),
-                round(
-                    bounds.centery
-                    + (nebula.y - 0.5) * bounds.height * self._galaxy_zoom
-                    + self._map_pan.y
-                ),
-            )
+        nebula_colors = (
+            (49, 124, 174),
+            (112, 82, 166),
+            (44, 131, 146),
+        )
+        for index, nebula in enumerate(campaign.galaxy.nebulae):
+            position = self._galaxy_position(nebula.x, nebula.y)
             size = (
-                max(1, round(nebula.radius * bounds.width * 2)),
-                max(1, round(nebula.radius * bounds.height * 1.4)),
+                max(24, round(nebula.radius * bounds.width * 2.8)),
+                max(20, round(nebula.radius * bounds.height * 2.2)),
             )
-            cloud = pygame.Surface(size, pygame.SRCALPHA)
-            pygame.draw.ellipse(cloud, (68, 109, 163, 28), cloud.get_rect())
+            color = nebula_colors[index % len(nebula_colors)]
+            cache_key = size, color
+            cloud = self._nebula_cache.get(cache_key)
+            if cloud is None:
+                cloud = pygame.Surface(size, pygame.SRCALPHA)
+                for scale, alpha in ((1.0, 7), (0.72, 10), (0.42, 14)):
+                    rect = pygame.Rect(0, 0, *size)
+                    rect.inflate_ip(
+                        -round(size[0] * (1 - scale)),
+                        -round(size[1] * (1 - scale)),
+                    )
+                    rect.center = (size[0] // 2, size[1] // 2)
+                    pygame.draw.ellipse(cloud, (*color, alpha), rect)
+                self._nebula_cache[cache_key] = cloud
             self.screen.blit(cloud, cloud.get_rect(center=position))
+
+        connections: set[str] = set()
         for first_id, second_id in campaign.routes:
+            if first_id == self._selected_system:
+                connections.add(second_id)
+            elif second_id == self._selected_system:
+                connections.add(first_id)
+        for first_id, second_id in campaign.routes:
+            selected_route = self._selected_system in (first_id, second_id)
+            first = campaign.get_system(first_id)
+            second = campaign.get_system(second_id)
+            if selected_route:
+                route_color = (87, 205, 220)
+            elif first.colonized or second.colonized:
+                route_color = (56, 117, 125)
+            else:
+                route_color = (50, 79, 105)
             pygame.draw.line(
                 self.screen,
-                theme.accent if self.ui.high_contrast else (72, 131, 157),
+                theme.accent if selected_route and self.ui.high_contrast else route_color,
                 self._map_position(first_id),
                 self._map_position(second_id),
-                2,
+                2 if selected_route else 1,
             )
+        label_candidates: list[tuple[int, StarSystem, tuple[int, int]]] = []
         for system in campaign.systems:
             position = self._map_position(system.system_id)
-            if system.colonized:
-                color = theme.accent
-            elif system.surveyed:
-                color = theme.warning
-            else:
-                color = theme.muted
-            radius = 9 if system.system_id == self._selected_system else 5
-            pygame.draw.circle(self.screen, theme.panel_alt, position, radius + 6)
+            status_color = (
+                theme.accent
+                if system.colonized
+                else theme.warning
+                if system.surveyed
+                else theme.muted
+            )
+            radius = 8 if system.system_id == self._selected_system else 5
+            pygame.draw.circle(self.screen, status_color, position, radius + 3, 1)
+            system_kinds = {obj.kind for obj in system.objects}
+            if "Gateway" in system_kinds:
+                pygame.draw.circle(self.screen, (255, 207, 123), position, radius + 6, 1)
+            elif "Wormhole" in system_kinds:
+                pygame.draw.circle(self.screen, (89, 217, 226), position, radius + 6, 1)
+            elif "Anomaly" in system_kinds:
+                pygame.draw.circle(self.screen, (197, 142, 255), position, radius + 6, 1)
             if system.star_type in ("Black hole", "Neutron star"):
                 pygame.draw.circle(self.screen, (183, 142, 255), position, radius + 3, 2)
                 pygame.draw.circle(
@@ -752,7 +842,7 @@ class GameWindow:
                     radius,
                 )
             else:
-                star_color = self._star_color(system.star_type, color)
+                star_color = self._star_color(system.star_type, status_color)
                 pygame.draw.circle(self.screen, star_color, position, radius)
                 if system.companion_star_type is not None:
                     pygame.draw.circle(
@@ -762,12 +852,52 @@ class GameWindow:
                         max(2, radius // 2),
                     )
             if system.system_id == self._selected_system:
-                pygame.draw.circle(self.screen, theme.text, position, radius + 4, 1)
-            label = self.ui.fonts.get(13).render(system.name, True, theme.text)
+                pygame.draw.circle(self.screen, theme.text, position, radius + 6, 1)
+            label_priority = (
+                0
+                if system.system_id == self._selected_system
+                else 1
+                if system.colonized
+                else 2
+                if system.surveyed
+                else 3
+                if system.system_id in connections
+                else 4
+            )
+            if label_priority < 4 or self._galaxy_zoom >= 0.82:
+                label_candidates.append((label_priority, system, position))
+
+        label_font = self.ui.fonts.get(13)
+        occupied_labels: list[pygame.Rect] = []
+        for _, system, position in sorted(
+            label_candidates,
+            key=lambda candidate: (
+                candidate[0],
+                candidate[1].name,
+            ),
+        ):
+            if (
+                self._galaxy_zoom < 0.62
+                and system.system_id != self._selected_system
+                and not system.surveyed
+                and not system.colonized
+            ):
+                continue
+            label = label_font.render(
+                system.name,
+                True,
+                theme.accent if system.system_id == self._selected_system else theme.text,
+            )
             label_rect = label.get_rect(midleft=(position[0] + 11, position[1]))
             if label_rect.right > bounds.right:
                 label_rect.midright = (position[0] - 11, position[1])
+            if (
+                system.system_id != self._selected_system
+                and any(label_rect.colliderect(existing) for existing in occupied_labels)
+            ):
+                continue
             self.screen.blit(label, label_rect)
+            occupied_labels.append(label_rect)
 
         self.screen.set_clip(previous_clip)
         pygame.draw.rect(self.screen, theme.muted, bounds, 1)
@@ -783,6 +913,19 @@ class GameWindow:
             self.ui.fonts.get(14),
             theme.muted,
         )
+        legend_y = bounds.y + 49
+        legend_font = self.ui.fonts.get(12)
+        legend = (
+            (theme.muted, "OPEN"),
+            (theme.warning, "SURVEYED"),
+            (theme.accent, "COLONY"),
+        )
+        legend_x = bounds.x + 12
+        legend_step = max(64, min(98, (bounds.width - 24) // len(legend)))
+        for color, label_text in legend:
+            pygame.draw.circle(self.screen, color, (legend_x + 5, legend_y + 6), 4, 1)
+            self._label(label_text, (legend_x + 13, legend_y), legend_font, theme.muted)
+            legend_x += legend_step
         self._label(
             (
                 f"{len(campaign.systems)} STARS  /  SEED {campaign.galaxy.seed}  /  "
@@ -805,23 +948,61 @@ class GameWindow:
         pygame.draw.rect(self.screen, theme.muted, card, 1, border_radius=5)
         system = self.application.campaign.get_system(self._selected_system)
         image_center = (card.x + 54, card.centery)
-        pygame.draw.circle(self.screen, (48, 113, 144), image_center, 29)
-        pygame.draw.circle(self.screen, (133, 203, 202), (image_center[0] - 8, image_center[1] - 8), 11)
-        pygame.draw.circle(self.screen, theme.panel, (image_center[0] + 22, image_center[1] + 14), 28, 8)
+        pygame.draw.circle(self.screen, (48, 113, 144), image_center, 29, 1)
+        pygame.draw.circle(
+            self.screen,
+            self._star_color(system.star_type, theme.accent),
+            image_center,
+            9,
+        )
+        if system.companion_star_type is not None:
+            pygame.draw.circle(
+                self.screen,
+                self._star_color(system.companion_star_type, theme.warning),
+                (image_center[0] + 13, image_center[1] + 6),
+                5,
+            )
         text_x = card.x + 100
         max_width = card.right - text_x - 8
         font = self.ui.fonts.get(16)
-        self._label(system.name.upper(), (text_x, card.y + 8), font, theme.accent)
-        self._label(
-            f"OBJECTIVE: {self.application.campaign.objective}",
-            (text_x, card.y + 29),
-            self.ui.fonts.get(14),
-            theme.warning,
+        status_color = (
+            theme.accent
+            if system.colonized
+            else theme.warning
+            if system.surveyed
+            else theme.muted
         )
-        for index, line in enumerate(
-            self._wrap_text(font, system.description, max_width)[:2]
-        ):
-            self._label(line, (text_x, card.y + 52 + index * 18), font, theme.text)
+        self._label(
+            system.name.upper(),
+            (text_x, card.y + 7),
+            font,
+            theme.accent,
+        )
+        self._label(
+            (
+                f"{system.status.upper()}  |  {system.star_type}  |  "
+                f"{system.mass_solar:.2f} M_sun"
+            ),
+            (text_x, card.y + 27),
+            self.ui.fonts.get(14),
+            status_color,
+        )
+        description_font = self.ui.fonts.get(14)
+        description = self._wrap_text(
+            description_font,
+            system.description,
+            max_width,
+        )
+        if description:
+            self._label(description[0], (text_x, card.y + 50), description_font, theme.text)
+        objective_font = self.ui.fonts.get(13)
+        objective = self._wrap_text(
+            objective_font,
+            f"OBJECTIVE: {self.application.campaign.objective}",
+            max_width,
+        )
+        if objective:
+            self._label(objective[0], (text_x, card.y + 70), objective_font, theme.warning)
 
     def _system_object_position(self, object_id: str) -> tuple[int, int]:
         bounds = self._map_rect()
@@ -1044,6 +1225,9 @@ class GameWindow:
             "A-type": (190, 218, 255),
             "B-type": (133, 176, 255),
             "O-type": (128, 156, 255),
+            "White dwarf": (213, 230, 255),
+            "Neutron star": (147, 204, 255),
+            "Black hole": (20, 17, 35),
         }.get(star_type, fallback)
 
     def _select_system_object(self, position: tuple[int, int]) -> bool:

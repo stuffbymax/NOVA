@@ -22,8 +22,11 @@ galaxy_name = "Milky Way"
 ```
 
 The galaxy view shows its name, sector, morphology, system count, seed, and
-diameter. Spiral, elliptical, and irregular sectors use different density
-profiles; positions also include galactic height. Generated stars use a
+diameter. The map distinguishes star types and system survey status, marks
+gateways, wormholes, and anomalies, and highlights routes from the selected
+system. Zoom with the mouse wheel, pan with the right mouse button, and press
+Home to reset the map. Spiral, elliptical, and irregular sectors use different
+density profiles; positions also include galactic height. Generated stars use a
 weighted spectral distribution, approximate masses, luminosities, ages, and
 metallicity gradients. Binary systems constrain stable planet orbits. Planets
 have ordered AU-scale orbits, mass and radius estimates, and only long-lived
