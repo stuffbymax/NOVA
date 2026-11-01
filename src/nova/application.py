@@ -16,7 +16,12 @@ class Application:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.engine = GameEngine()
-        self.campaign = Campaign()
+        self.campaign = Campaign(
+            seed=config.galaxy_seed,
+            size=config.galaxy_size,
+            shape=config.galaxy_shape,
+            galaxy_name=config.galaxy_name,
+        )
         self.content = ContentCatalog(config.content_path)
         self.factions: dict[str, FactionDefinition] = self.content.factions
         self.nations: dict[str, NationDefinition] = self.content.nations

@@ -219,14 +219,16 @@ class GameWindow:
         resource_line = (
             (
                 f"{campaign.date_label}  A:{campaign.alloys:.0f}  "
-                f"S:{campaign.science:.0f}  I:{campaign.influence:.0f}"
+                f"S:{campaign.science:.0f}  I:{campaign.influence:.0f}  "
+                f"V:{campaign.volatiles:.0f}"
             )
             if width < 900
             else (
                 f"FRONTIER  {campaign.date_label}    "
                 f"ALLOYS {campaign.alloys:.0f}    "
                 f"SCIENCE {campaign.science:.0f}    "
-                f"INFLUENCE {campaign.influence:.0f}"
+                f"INFLUENCE {campaign.influence:.0f}    "
+                f"VOLATILES {campaign.volatiles:.0f}"
             )
         )
         resource_font = small_font if width >= 900 else self.ui.fonts.get(14)
@@ -491,7 +493,7 @@ class GameWindow:
         )
         table_y = self.dropdown.rect.bottom + round(8 * scale)
         reserved_details_height = round(
-            (112 if self.tabs is not None and self.tabs.active == "SYSTEM" else 52)
+            (160 if self.tabs is not None and self.tabs.active == "SYSTEM" else 72)
             * scale
         )
         table_height = max(
@@ -701,6 +703,28 @@ class GameWindow:
         bounds = self._map_rect()
         campaign = self.application.campaign
         theme = self.ui.theme
+        previous_clip = self.screen.get_clip()
+        self.screen.set_clip(bounds)
+        for nebula in campaign.galaxy.nebulae:
+            position = (
+                round(
+                    bounds.centerx
+                    + (nebula.x - 0.5) * bounds.width * self._galaxy_zoom
+                    + self._map_pan.x
+                ),
+                round(
+                    bounds.centery
+                    + (nebula.y - 0.5) * bounds.height * self._galaxy_zoom
+                    + self._map_pan.y
+                ),
+            )
+            size = (
+                max(1, round(nebula.radius * bounds.width * 2)),
+                max(1, round(nebula.radius * bounds.height * 1.4)),
+            )
+            cloud = pygame.Surface(size, pygame.SRCALPHA)
+            pygame.draw.ellipse(cloud, (68, 109, 163, 28), cloud.get_rect())
+            self.screen.blit(cloud, cloud.get_rect(center=position))
         for first_id, second_id in campaign.routes:
             pygame.draw.line(
                 self.screen,
@@ -719,7 +743,24 @@ class GameWindow:
                 color = theme.muted
             radius = 9 if system.system_id == self._selected_system else 5
             pygame.draw.circle(self.screen, theme.panel_alt, position, radius + 6)
-            pygame.draw.circle(self.screen, color, position, radius)
+            if system.star_type in ("Black hole", "Neutron star"):
+                pygame.draw.circle(self.screen, (183, 142, 255), position, radius + 3, 2)
+                pygame.draw.circle(
+                    self.screen,
+                    (9, 8, 18) if system.star_type == "Black hole" else (196, 223, 255),
+                    position,
+                    radius,
+                )
+            else:
+                star_color = self._star_color(system.star_type, color)
+                pygame.draw.circle(self.screen, star_color, position, radius)
+                if system.companion_star_type is not None:
+                    pygame.draw.circle(
+                        self.screen,
+                        self._star_color(system.companion_star_type, color),
+                        (position[0] + radius, position[1] - radius),
+                        max(2, radius // 2),
+                    )
             if system.system_id == self._selected_system:
                 pygame.draw.circle(self.screen, theme.text, position, radius + 4, 1)
             label = self.ui.fonts.get(13).render(system.name, True, theme.text)
@@ -728,13 +769,30 @@ class GameWindow:
                 label_rect.midright = (position[0] - 11, position[1])
             self.screen.blit(label, label_rect)
 
+        self.screen.set_clip(previous_clip)
         pygame.draw.rect(self.screen, theme.muted, bounds, 1)
+        previous_clip = self.screen.get_clip()
+        self.screen.set_clip(bounds)
         self._label(
-            f"STELLAR SECTOR  /  {len(campaign.systems)} SYSTEMS  /  {self._galaxy_zoom:.1f}x",
+            (
+                f"{campaign.galaxy.name.upper()}  /  "
+                f"{campaign.galaxy.region_name.upper()}  /  "
+                f"{campaign.galaxy.morphology.upper()}"
+            ),
             (bounds.x + 12, bounds.y + 8),
-            self.ui.fonts.get(15),
+            self.ui.fonts.get(14),
             theme.muted,
         )
+        self._label(
+            (
+                f"{len(campaign.systems)} STARS  /  SEED {campaign.galaxy.seed}  /  "
+                f"{campaign.galaxy.diameter_light_years:,} LY  /  {self._galaxy_zoom:.1f}x"
+            ),
+            (bounds.x + 12, bounds.y + 28),
+            self.ui.fonts.get(13),
+            theme.muted,
+        )
+        self.screen.set_clip(previous_clip)
 
     def _draw_map_card(self) -> None:
         assert self.screen is not None
@@ -790,7 +848,7 @@ class GameWindow:
                 min(bounds.width, bounds.height)
                 * 0.43
                 * self._system_zoom
-                * system_object.orbit
+                * min(0.94, system_object.orbit)
             )
             return (round(bounds.centerx + orbit_radius), bounds.centery)
         index = system.objects.index(system_object)
@@ -841,12 +899,60 @@ class GameWindow:
                         1 + rock_index % 2,
                     )
 
-        pygame.draw.circle(self.screen, (109, 81, 52), center, 26)
-        pygame.draw.circle(self.screen, (255, 207, 123), center, 17)
-        pygame.draw.circle(self.screen, (255, 244, 205), (center[0] - 5, center[1] - 5), 6)
+        if system.star_type == "Black hole":
+            pygame.draw.ellipse(
+                self.screen,
+                (230, 129, 87),
+                pygame.Rect(center[0] - 30, center[1] - 12, 60, 24),
+                3,
+            )
+            pygame.draw.circle(self.screen, (5, 6, 14), center, 15)
+        elif system.star_type == "Neutron star":
+            pygame.draw.circle(self.screen, (138, 197, 255), center, 20)
+            pygame.draw.circle(self.screen, (228, 245, 255), center, 9)
+            pygame.draw.line(
+                self.screen,
+                (149, 210, 255),
+                (center[0] - 33, center[1] - 22),
+                (center[0] + 33, center[1] + 22),
+                2,
+            )
+        else:
+            star_color = self._star_color(system.star_type, (255, 207, 123))
+            if system.companion_star_type is None:
+                pygame.draw.circle(self.screen, (109, 81, 52), center, 26)
+                pygame.draw.circle(self.screen, star_color, center, 17)
+                pygame.draw.circle(self.screen, (255, 250, 230), (center[0] - 5, center[1] - 5), 6)
+            else:
+                companion_type = system.companion_star_type
+                assert companion_type is not None
+                for star_position, star_type in (
+                    ((center[0] - 9, center[1]), system.star_type),
+                    ((center[0] + 9, center[1]), companion_type),
+                ):
+                    pygame.draw.circle(self.screen, (109, 81, 52), star_position, 18)
+                    pygame.draw.circle(
+                        self.screen,
+                        self._star_color(star_type, (255, 207, 123)),
+                        star_position,
+                        12,
+                    )
         for system_object in system.objects:
             position = self._system_object_position(system_object.object_id)
-            if system_object.kind == "Gateway":
+            if system_object.kind == "Wormhole":
+                pygame.draw.ellipse(
+                    self.screen,
+                    (84, 209, 218),
+                    pygame.Rect(position[0] - 13, position[1] - 8, 26, 16),
+                    3,
+                )
+                pygame.draw.ellipse(
+                    self.screen,
+                    (173, 135, 243),
+                    pygame.Rect(position[0] - 8, position[1] - 13, 16, 26),
+                    2,
+                )
+            elif system_object.kind == "Gateway":
                 try:
                     gateway_art = self._scaled_asset(
                         "Anomalies/ancient gateway.jpg",
@@ -925,6 +1031,21 @@ class GameWindow:
             return (186, 152, 108)
         return (115, 123, 151)
 
+    @staticmethod
+    def _star_color(
+        star_type: str,
+        fallback: tuple[int, int, int],
+    ) -> tuple[int, int, int]:
+        return {
+            "M-type": (255, 145, 105),
+            "K-type": (255, 190, 125),
+            "G-type": (255, 220, 150),
+            "F-type": (255, 239, 207),
+            "A-type": (190, 218, 255),
+            "B-type": (133, 176, 255),
+            "O-type": (128, 156, 255),
+        }.get(star_type, fallback)
+
     def _select_system_object(self, position: tuple[int, int]) -> bool:
         system = self.application.campaign.get_system(self._selected_system)
         closest = min(
@@ -958,13 +1079,27 @@ class GameWindow:
             theme.accent,
         )
         self._label(
-            f"{system.star_type}  |  {system.world_type}  |  {system.status}",
+            (
+                f"{system.star_type}  |  {system.mass_solar:.2f} M_sun  |  "
+                f"{system.age_gyr:.1f} Gyr  |  {system.status}"
+            ),
             (left, y + 22),
             self.ui.fonts.get(15),
             theme.text,
         )
+        if system.companion_star_type is not None:
+            self._label(
+                (
+                    f"BINARY: {system.companion_star_type} companion at "
+                    f"{system.binary_separation_au:.2f} AU"
+                ),
+                (left, y + 42),
+                self.ui.fonts.get(13),
+                theme.warning,
+            )
         if compact:
             objective_font = self.ui.fonts.get(13)
+            objective_y = y + 44 + (18 if system.companion_star_type else 0)
             for index, line in enumerate(
                 self._wrap_text(
                     objective_font,
@@ -974,7 +1109,7 @@ class GameWindow:
             ):
                 self._label(
                     line,
-                    (left, y + 44 + index * 15),
+                    (left, objective_y + index * 15),
                     objective_font,
                     theme.warning,
                 )
@@ -986,7 +1121,7 @@ class GameWindow:
             for index, line in enumerate(description[:2]):
                 self._label(
                     line,
-                    (left, y + 76 + index * 17),
+                    (left, objective_y + 32 + index * 17),
                     self.ui.fonts.get(14),
                     theme.text,
                 )
@@ -1033,6 +1168,34 @@ class GameWindow:
                 description_font,
                 theme.text,
             )
+        detail_y = y + 96
+        if system_object.orbit_au is not None:
+            physical_data = f"ORBIT {system_object.orbit_au:.2f} AU"
+            if system_object.mass_earth is not None:
+                physical_data += f"  |  MASS {system_object.mass_earth:.1f} M_earth"
+            if system_object.radius_earth is not None:
+                physical_data += f"  |  RADIUS {system_object.radius_earth:.1f} R_earth"
+            for index, line in enumerate(
+                self._wrap_text(
+                    description_font,
+                    physical_data,
+                    self.systems.rect.width - 6,
+                )[:2]
+            ):
+                self._label(line, (left, detail_y), description_font, theme.warning)
+                detail_y += 17
+        if system_object.surveyed and system_object.resources:
+            deposits = "DEPOSITS: " + "  ".join(
+                f"{name} {amount}"
+                for name, amount in system_object.resources.items()
+            )
+            for line in self._wrap_text(
+                description_font,
+                deposits,
+                self.systems.rect.width - 6,
+            )[:2]:
+                self._label(line, (left, detail_y), description_font, theme.warning)
+                detail_y += 17
 
     def _draw_chronicle(self, font: pygame.font.Font) -> None:
         assert self.screen is not None

@@ -94,26 +94,26 @@
 
 ## 5. Galaxy Generation
 
-- [ ] Implement galaxy coordinate system
-- [ ] Implement procedural galaxy generation with spiral arms, elliptical shapes, and irregular clusters like in stellaris (game) but incude real galaxy and names. and implement more realistic galaxy generation with real galaxy types and names and more realistic star distribution and more realistic star types and more realistic star system generation and more realistic planet generation and more realistic moon generation and more realistic asteroid belt generation and more realistic nebulae generation and more realistic black hole generation and more realistic wormhole generation and more realistic resource distribution and more realistic habitable world generation and more realistic ancient ruins generation and more realistic anomalies generation and more realistic galaxy naming generator and more realistic galaxy generation seeds and more realistic generation validation and more besicaly stellaris but more realistic and complex yet fun
+- [✔ ] Implement galaxy coordinate system
+- [✔ ] Implement seeded, validated spiral, elliptical, and irregular galaxy generation with real catalogue names and realistic star and planetary systems
 
-- [ ] Implement galaxy size settings
-- [ ] Implement star generation
-- [ ] Implement star classification
-- [ ] Implement star system generation
-- [ ] Implement planet generation
-- [ ] Implement moon generation
-- [ ] Implement asteroid belts
-- [ ] Implement nebulae
-- [ ] Implement black holes
-- [ ] Implement wormholes
-- [ ] Implement resource distribution
-- [ ] Implement habitable world generation
-- [ ] Implement ancient ruins
-- [ ] Implement anomalies
-- [ ] Implement galaxy naming generator
-- [ ] Implement galaxy generation seeds
-- [ ] Implement generation validation
+- [✔ ] Implement galaxy size settings
+- [✔ ] Implement star generation
+- [✔ ] Implement star classification
+- [✔ ] Implement star system generation
+- [✔ ] Implement planet generation
+- [✔ ] Implement moon generation
+- [✔ ] Implement asteroid belts
+- [✔ ] Implement nebulae
+- [✔ ] Implement black holes
+- [✔ ] Implement wormholes
+- [✔ ] Implement resource distribution
+- [✔ ] Implement habitable world generation
+- [✔ ] Implement ancient ruins
+- [✔ ] Implement anomalies
+- [✔ ] Implement galaxy naming generator
+- [✔ ] Implement galaxy generation seeds
+- [✔ ] Implement generation validation
 
 ## 6. Galaxy Map
 

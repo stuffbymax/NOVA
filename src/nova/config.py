@@ -13,6 +13,10 @@ class Config:
     log_level: str = "INFO"
     content_path: Path = Path("content")
     asset_path: Path = Path("assets")
+    galaxy_seed: int = 2480
+    galaxy_size: str = "medium"
+    galaxy_shape: str = "spiral"
+    galaxy_name: str | None = None
     window_width: int = 1280
     window_height: int = 720
     fullscreen: bool = False
@@ -32,6 +36,14 @@ def load_config(path: Path | None = None) -> Config:
         log_level=str(data.get("log_level", "INFO")).upper(),
         content_path=Path(str(data.get("content_path", "content"))),
         asset_path=Path(str(data.get("asset_path", "assets"))),
+        galaxy_seed=int(data.get("galaxy_seed", 2480)),
+        galaxy_size=str(data.get("galaxy_size", "medium")).casefold(),
+        galaxy_shape=str(data.get("galaxy_shape", "spiral")).casefold(),
+        galaxy_name=(
+            str(data["galaxy_name"])
+            if data.get("galaxy_name") is not None
+            else None
+        ),
         window_width=max(640, int(data.get("window_width", 1280))),
         window_height=max(360, int(data.get("window_height", 720))),
         fullscreen=bool(data.get("fullscreen", False)),

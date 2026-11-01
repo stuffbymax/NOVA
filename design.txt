@@ -11,7 +11,7 @@ Images, icons, maps and illustrations.
 
 
 Gameplay is primarily clicking, selecting,pointing reading and entering text.
-- you can edit everyting from planet to galaxy
+- you can edit everyting from planet to galaxy and civilisations besicaly the game will be editable and user can create content very easialy
 
 The first playable campaign combines a clickable star map with text-led actions:
 survey unknown systems, found frontier colonies, manage alloys/science/influence,
@@ -32,5 +32,7 @@ Highly moddable, with Python scripting support.
 
 
 Linux and windows as the primary development platform.
+
+besicaly stellaris, master of orion, and endless legend 2
 
 mod menu/commands support for cheating
