@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSET_DIR = ROOT / "assets" / "generated"
+ASSET_DIR = ROOT / "assets"
 SVG_NAMESPACE = "{http://www.w3.org/2000/svg}"
 
 

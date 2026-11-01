@@ -1,4 +1,6 @@
 from nova.engine import GameEngine
+from nova.application import Application
+from nova.config import Config
 from nova.rng import DeterministicRng
 from nova.ticks import TickScheduler
 
@@ -61,3 +63,17 @@ def test_engine_rejects_negative_delta() -> None:
         assert str(error) == "Delta time cannot be negative"
     else:
         raise AssertionError("Expected negative delta to be rejected")
+
+
+def test_application_campaign_advances_with_unpaused_simulation(tmp_path) -> None:
+    application = Application(Config(content_path=tmp_path))
+    application.start()
+    application.engine.clock.pause()
+
+    assert application.update(5) == 0
+    assert application.campaign.elapsed_days == 0
+
+    application.engine.clock.resume()
+    assert application.update(5) == 5
+    assert application.campaign.elapsed_days == 5
+    application.shutdown()

@@ -6,8 +6,8 @@ import pytest
 from nova.assets import AssetError, AssetManager
 
 
-def test_generated_art_is_valid_svg() -> None:
-    asset_directory = Path(__file__).resolve().parents[1] / "assets" / "generated"
+def test_root_asset_art_is_valid_svg() -> None:
+    asset_directory = Path(__file__).resolve().parents[1] / "assets"
     assets = list(asset_directory.glob("*.svg"))
 
     assert assets

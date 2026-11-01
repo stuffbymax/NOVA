@@ -10,8 +10,13 @@ Images, icons, maps and illustrations.
 
 
 
-Gameplay is primarily clicking, selecting, reading and entering text.
+Gameplay is primarily clicking, selecting,pointing reading and entering text.
 - you can edit everyting from planet to galaxy
+
+The first playable campaign combines a clickable star map with text-led actions:
+survey unknown systems, found frontier colonies, manage alloys/science/influence,
+and investigate the ancient gateway. Simulation time produces resources, and
+the chronicle records discoveries and decisions.
 
 
 Real-time simulation with pause and adjustable speed.

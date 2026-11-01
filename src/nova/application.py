@@ -3,6 +3,7 @@
 import logging
 
 from .config import Config
+from .campaign import Campaign
 from .content import ContentCatalog, FactionDefinition, NationDefinition
 from .engine import GameEngine
 
@@ -15,6 +16,7 @@ class Application:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.engine = GameEngine()
+        self.campaign = Campaign()
         self.content = ContentCatalog(config.content_path)
         self.factions: dict[str, FactionDefinition] = self.content.factions
         self.nations: dict[str, NationDefinition] = self.content.nations
@@ -39,4 +41,6 @@ class Application:
         """Advance the game simulation from a future rendering loop."""
         if not self._running:
             return 0.0
-        return self.engine.update(real_delta)
+        simulated_delta = self.engine.update(real_delta)
+        self.campaign.advance(simulated_delta)
+        return simulated_delta
