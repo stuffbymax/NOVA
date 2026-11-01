@@ -10,6 +10,7 @@ from .application import Application
 from .assets import AssetError, AssetManager
 from .campaign import StarSystem, SystemObject
 from .config import Config
+from .persistence import SaveError
 from .ui import (
     Button,
     Dropdown,
@@ -41,6 +42,11 @@ class GameWindow:
         self.screen: pygame.Surface | None = None
         self._clock = pygame.time.Clock()
         self._running = False
+        self._menu_active = False
+        self._menu_message = ""
+        self._selected_species_id = application.campaign.player_species_id
+        self._menu_buttons: list[Button] = []
+        self._species_card_rects: dict[str, pygame.Rect] = {}
         self._fullscreen = config.fullscreen
         self._windowed_size = (config.window_width, config.window_height)
         self._speed_index = 1
@@ -85,6 +91,9 @@ class GameWindow:
         self.speed_button: Button | None = None
         self.pause_button: Button | None = None
         self.action_button: Button | None = None
+        self.research_button: Button | None = None
+        self.create_fleet_button: Button | None = None
+        self.move_fleet_button: Button | None = None
         self._widgets: list[FocusableWidget] = []
         self._focusables: list[FocusableWidget] = []
 
@@ -104,6 +113,7 @@ class GameWindow:
             self._bounds.height -= 54
             self.windows = WindowManager(self._bounds)
             self._build_ui()
+            self._show_main_menu()
             self._running = True
             while self._running:
                 self._handle_events()
@@ -131,6 +141,10 @@ class GameWindow:
                 self._layout_ui()
                 self._clamp_map_pan()
                 self._nebula_cache.clear()
+                self._layout_menu()
+                continue
+            if self._menu_active:
+                self._handle_menu_event(event)
                 continue
             if self.ui.modal is not None:
                 self.ui.handle_event(event, self._widgets)
@@ -164,6 +178,15 @@ class GameWindow:
                         )
                     continue
             if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_F5:
+                    self._save_campaign()
+                    continue
+                if event.key == pygame.K_F9:
+                    self._load_campaign()
+                    continue
+                if event.key == pygame.K_F10:
+                    self._show_main_menu()
+                    continue
                 if event.key == pygame.K_ESCAPE:
                     self._show_exit_dialog()
                     continue
@@ -309,6 +332,9 @@ class GameWindow:
             self.screen.blit(background, (0, 0))
         except AssetError as error:
             logger.debug("Galaxy background unavailable: %s", error)
+        if self._menu_active:
+            self._draw_main_menu()
+            return
         if self.tabs is not None and self.tabs.active == "SYSTEM":
             self._draw_system_map()
         else:
@@ -324,7 +350,8 @@ class GameWindow:
             (
                 f"{campaign.date_label}  A:{campaign.alloys:.0f}  "
                 f"S:{campaign.science:.0f}  I:{campaign.influence:.0f}  "
-                f"V:{campaign.volatiles:.0f}"
+                f"V:{campaign.volatiles:.0f}  E:{campaign.energy:.0f}  "
+                f"F:{campaign.food:.0f}"
             )
             if width < 900
             else (
@@ -332,7 +359,8 @@ class GameWindow:
                 f"ALLOYS {campaign.alloys:.0f}    "
                 f"SCIENCE {campaign.science:.0f}    "
                 f"INFLUENCE {campaign.influence:.0f}    "
-                f"VOLATILES {campaign.volatiles:.0f}"
+                f"VOLATILES {campaign.volatiles:.0f}    "
+                f"ENERGY {campaign.energy:.0f}    FOOD {campaign.food:.0f}"
             )
         )
         resource_font = small_font if width >= 900 else self.ui.fonts.get(14)
@@ -352,7 +380,8 @@ class GameWindow:
         assert self.scale_up is not None
         assert self.contrast_button is not None
         assert self.action_button is not None
-        self.tabs.draw(self.screen, small_font, theme)
+        tab_font = self.ui.fonts.get(14 if width < 900 else 16)
+        self.tabs.draw(self.screen, tab_font, theme)
         if self.tabs.active == "GALAXY":
             compact = height < 560
             if not compact:
@@ -372,8 +401,19 @@ class GameWindow:
                 self._selected_object,
             )
             self.action_button.draw(self.screen, small_font, theme)
-        else:
+        elif self.tabs.active == "CHRONICLE":
             self._draw_chronicle(small_font)
+        else:
+            self._draw_empire(small_font, height < 560)
+            self.action_button.label = "BUILD SELECTED"
+            self.action_button.draw(self.screen, small_font, theme)
+            assert self.research_button is not None
+            assert self.create_fleet_button is not None
+            assert self.move_fleet_button is not None
+            self.research_button.label = self._research_button_label()
+            self.research_button.draw(self.screen, small_font, theme)
+            self.create_fleet_button.draw(self.screen, small_font, theme)
+            self.move_fleet_button.draw(self.screen, small_font, theme)
         self.speed_button.label = f"SPEED {self._speed_label()}"
         self.pause_button.label = "RESUME" if paused else "PAUSE"
         self.contrast_button.label = "HC ON" if self.ui.high_contrast else "HC OFF"
@@ -390,17 +430,189 @@ class GameWindow:
             help_text = (
                 "Click body  |  M manage  H history  D details  |  BACKSPACE galaxy"
             )
+        elif self.tabs.active == "EMPIRE":
+            help_text = (
+                "Choose a building above  |  build  |  research  |  commission or move fleets  |  "
+                "F5 save  F9 load  F10 menu"
+            )
+        elif self.tabs.active == "CHRONICLE":
+            help_text = "Empire history  |  F5 save  F9 load  F10 menu"
         else:
             help_text = (
                 "Click star  |  wheel zoom  |  right-drag pan  |  Home reset  |  "
                 "P borders  T trade  R resources  S sensors  F fog  E explore  "
-                "Ctrl+B bookmark  B next  Space pause"
+                "Ctrl+B bookmark  B next  Space pause  F5 save  F9 load  F10 menu"
             )
         help_font = self.ui.fonts.get(11) if self.tabs.active == "GALAXY" else (
             self.ui.fonts.get(13) if width < 900 else small_font
         )
         self._label(help_text, (18, height - 22), help_font, theme.muted)
         self.ui.draw_overlays(self.screen, small_font, small_font)
+
+    def _show_main_menu(self) -> None:
+        self._menu_active = True
+        self.application.engine.clock.pause()
+        self._menu_buttons = [
+            Button(pygame.Rect(0, 0, 1, 1), "NEW GAME", self._start_new_game),
+            Button(pygame.Rect(0, 0, 1, 1), "CONTINUE", self._continue_game),
+            Button(pygame.Rect(0, 0, 1, 1), "LOAD QUICK SAVE", self._load_campaign),
+            Button(pygame.Rect(0, 0, 1, 1), "QUIT", lambda: setattr(self, "_running", False)),
+        ]
+        self._layout_menu()
+
+    def _layout_menu(self) -> None:
+        if self.screen is None or not self._menu_buttons:
+            return
+        width, height = self.screen.get_size()
+        margin = 24
+        gap = 10
+        button_height = 42
+        button_width = (width - 2 * margin - 3 * gap) // 4
+        first_y = height - button_height - 22
+        for index, button in enumerate(self._menu_buttons):
+            button.rect = pygame.Rect(
+                margin + index * (button_width + gap),
+                first_y,
+                button_width,
+                button_height,
+            )
+        card_gap = 12
+        card_width = (width - 2 * margin - card_gap * 2) // 3
+        card_top = max(94, height // 4)
+        card_height = min(252, max(150, first_y - card_top - 28))
+        self._species_card_rects = {
+            species_id: pygame.Rect(
+                margin + index * (card_width + card_gap),
+                card_top,
+                card_width,
+                card_height,
+            )
+            for index, species_id in enumerate(self.application.campaign.species_catalog)
+        }
+
+    def _handle_menu_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            if self._running:
+                self._menu_active = False
+                self.application.engine.clock.resume()
+            return
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for species_id, rect in self._species_card_rects.items():
+                if rect.collidepoint(event.pos):
+                    self._selected_species_id = species_id
+                    return
+        for button in self._menu_buttons:
+            if button.handle(event):
+                return
+
+    def _draw_main_menu(self) -> None:
+        assert self.screen is not None
+        width, height = self.screen.get_size()
+        theme = self.ui.theme
+        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        overlay.fill((3, 10, 21, 210))
+        self.screen.blit(overlay, (0, 0))
+        self._label("NOVA", (24, 18), self.ui.fonts.get(42), theme.accent)
+        self._label(
+            "NETWORK FOR ORBITAL VENTURES AND ASCENSION",
+            (28, 62),
+            self.ui.fonts.get(13),
+            theme.muted,
+        )
+        self._label(
+            "CHOOSE YOUR SPECIES",
+            (24, next(iter(self._species_card_rects.values())).y - 24),
+            self.ui.fonts.get(14),
+            theme.warning,
+        )
+        for species_id, rect in self._species_card_rects.items():
+            profile = self.application.campaign.species_catalog[species_id]
+            selected = species_id == self._selected_species_id
+            pygame.draw.rect(self.screen, theme.panel, rect, border_radius=8)
+            pygame.draw.rect(
+                self.screen,
+                theme.accent if selected else theme.muted,
+                rect,
+                2 if selected else 1,
+                border_radius=8,
+            )
+            portrait_size = min(rect.width - 18, rect.height - 82)
+            portrait = self._scaled_asset(profile.portrait, (portrait_size, portrait_size))
+            self.screen.blit(portrait, (rect.centerx - portrait_size // 2, rect.y + 8))
+            self._label(
+                profile.name,
+                (rect.x + 10, rect.y + portrait_size + 14),
+                self.ui.fonts.get(18),
+                theme.text,
+            )
+            self._label(
+                f"LIFESPAN {profile.lifespan_years} YEARS",
+                (rect.x + 10, rect.y + portrait_size + 38),
+                self.ui.fonts.get(12),
+                theme.muted,
+            )
+            traits = ", ".join(profile.traits)
+            for index, line in enumerate(
+                self._wrap_text(self.ui.fonts.get(12), traits, rect.width - 20)[:2]
+            ):
+                self._label(
+                    line,
+                    (rect.x + 10, rect.y + portrait_size + 55 + index * 15),
+                    self.ui.fonts.get(12),
+                    theme.warning,
+                )
+        for button in self._menu_buttons:
+            button.draw(self.screen, self.ui.fonts.get(13), theme)
+        if self._menu_message:
+            self._label(
+                self._menu_message,
+                (self._menu_buttons[0].rect.x, self._menu_buttons[0].rect.y - 20),
+                self.ui.fonts.get(14),
+                theme.warning,
+            )
+
+    def _start_new_game(self) -> None:
+        self.application.new_game(self._selected_species_id)
+        self._selected_system = "sol"
+        self._selected_object = "earth"
+        self._planet_view = "DETAILS"
+        self._menu_active = False
+        self._menu_message = ""
+        if self.tabs is not None:
+            self.tabs.active = "GALAXY"
+        self.application.engine.clock.resume()
+        self._filter_content()
+        self.ui.notify("New frontier campaign started")
+
+    def _continue_game(self) -> None:
+        self._menu_active = False
+        self.application.engine.clock.resume()
+
+    def _save_campaign(self) -> None:
+        try:
+            self.application.save_game()
+        except SaveError as error:
+            self._menu_message = str(error)
+            self.ui.notify(str(error))
+            return
+        self._menu_message = "Quick save complete"
+        self.ui.notify("Campaign saved")
+
+    def _load_campaign(self) -> None:
+        try:
+            self.application.load_game()
+        except SaveError as error:
+            self._menu_message = str(error)
+            self.ui.notify(str(error))
+            return
+        self._selected_system = "sol"
+        self._selected_object = "earth"
+        self._planet_view = "DETAILS"
+        self._menu_message = ""
+        self._menu_active = False
+        self.application.engine.clock.resume()
+        self._filter_content()
+        self.ui.notify("Campaign loaded")
 
     def _build_ui(self) -> None:
         assert self.screen is not None
@@ -416,7 +628,10 @@ class GameWindow:
         )
         self.overview = panel
         self.windows.add(panel)
-        self.tabs = TabBar(pygame.Rect(0, 0, 1, 1), ["GALAXY", "SYSTEM", "CHRONICLE"])
+        self.tabs = TabBar(
+            pygame.Rect(0, 0, 1, 1),
+            ["GALAXY", "SYSTEM", "EMPIRE", "CHRONICLE"],
+        )
         self.search = TextInput(pygame.Rect(0, 0, 1, 1), "Search...")
         self.dropdown = Dropdown(
             pygame.Rect(0, 0, 1, 1),
@@ -433,6 +648,24 @@ class GameWindow:
             "",
             self._perform_selected_action,
             "Carry out the available action in this system",
+        )
+        self.research_button = Button(
+            pygame.Rect(0, 0, 1, 1),
+            "START RESEARCH",
+            self._start_next_research,
+            "Begin the next available technology",
+        )
+        self.create_fleet_button = Button(
+            pygame.Rect(0, 0, 1, 1),
+            "NEW FLEET",
+            self._create_fleet,
+            "Commission a new fleet for 35 alloys",
+        )
+        self.move_fleet_button = Button(
+            pygame.Rect(0, 0, 1, 1),
+            "MOVE FLEET",
+            self._move_fleet_to_selection,
+            "Send an idle fleet along a navigable route to the selected system",
         )
         self.scale_down = Button(
             pygame.Rect(0, 0, 1, 1),
@@ -520,12 +753,42 @@ class GameWindow:
             )
             action_y = control_y - button_height - gap
             assert self.action_button is not None
-            self.action_button.rect = pygame.Rect(
-                content_x,
-                action_y,
-                content_width,
-                button_height,
-            )
+            if self.tabs is not None and self.tabs.active == "EMPIRE":
+                half_width = (content_width - gap) // 2
+                fleet_y = action_y - button_height - gap
+                self.action_button.rect = pygame.Rect(
+                    content_x, action_y, half_width, button_height
+                )
+                assert self.research_button is not None
+                assert self.create_fleet_button is not None
+                assert self.move_fleet_button is not None
+                self.research_button.rect = pygame.Rect(
+                    content_x + half_width + gap,
+                    action_y,
+                    content_width - half_width - gap,
+                    button_height,
+                )
+                self.create_fleet_button.rect = pygame.Rect(
+                    content_x, fleet_y, half_width, button_height
+                )
+                self.move_fleet_button.rect = pygame.Rect(
+                    content_x + half_width + gap,
+                    fleet_y,
+                    content_width - half_width - gap,
+                    button_height,
+                )
+                action_y = fleet_y
+            else:
+                self.action_button.rect = pygame.Rect(
+                    content_x, action_y, content_width, button_height
+                )
+                for button in (
+                    self.research_button,
+                    self.create_fleet_button,
+                    self.move_fleet_button,
+                ):
+                    if button is not None:
+                        button.rect = pygame.Rect(0, 0, 1, 1)
             log_y = self.tabs.rect.bottom + round(8 * scale)
             self.systems.rect = pygame.Rect(
                 content_x,
@@ -534,7 +797,16 @@ class GameWindow:
                 max(1, action_y - log_y - round(8 * scale)),
             )
             self.search.rect = pygame.Rect(0, 0, 1, 1)
-            self.dropdown.rect = pygame.Rect(0, 0, 1, 1)
+            self.dropdown.rect = (
+                pygame.Rect(
+                    content_x,
+                    self.tabs.rect.bottom + round(8 * scale),
+                    content_width,
+                    round(30 * scale),
+                )
+                if self.tabs is not None and self.tabs.active == "EMPIRE"
+                else pygame.Rect(0, 0, 1, 1)
+            )
             return
         self.tabs.rect = pygame.Rect(
             content_x,
@@ -542,15 +814,23 @@ class GameWindow:
             content_width,
             round(34 * scale),
         )
-        self.search.rect = pygame.Rect(
-            content_x,
-            rect.y + round(86 * scale),
-            content_width,
-            round(34 * scale),
+        self.search.rect = (
+            pygame.Rect(
+                content_x,
+                rect.y + round(86 * scale),
+                content_width,
+                round(34 * scale),
+            )
+            if self.tabs is None or self.tabs.active != "EMPIRE"
+            else pygame.Rect(0, 0, 1, 1)
         )
         self.dropdown.rect = pygame.Rect(
             content_x,
-            rect.y + round(128 * scale),
+            rect.y
+            + round(
+                (86 if self.tabs is not None and self.tabs.active == "EMPIRE" else 128)
+                * scale
+            ),
             content_width,
             round(34 * scale),
         )
@@ -592,12 +872,42 @@ class GameWindow:
         )
         action_y = control_y - button_height - gap
         assert self.action_button is not None
-        self.action_button.rect = pygame.Rect(
-            content_x,
-            action_y,
-            content_width,
-            button_height,
-        )
+        if self.tabs is not None and self.tabs.active == "EMPIRE":
+            half_width = (content_width - gap) // 2
+            fleet_y = action_y - button_height - gap
+            self.action_button.rect = pygame.Rect(
+                content_x, action_y, half_width, button_height
+            )
+            assert self.research_button is not None
+            assert self.create_fleet_button is not None
+            assert self.move_fleet_button is not None
+            self.research_button.rect = pygame.Rect(
+                content_x + half_width + gap,
+                action_y,
+                content_width - half_width - gap,
+                button_height,
+            )
+            self.create_fleet_button.rect = pygame.Rect(
+                content_x, fleet_y, half_width, button_height
+            )
+            self.move_fleet_button.rect = pygame.Rect(
+                content_x + half_width + gap,
+                fleet_y,
+                content_width - half_width - gap,
+                button_height,
+            )
+            action_y = fleet_y
+        else:
+            self.action_button.rect = pygame.Rect(
+                content_x, action_y, content_width, button_height
+            )
+            for button in (
+                self.research_button,
+                self.create_fleet_button,
+                self.move_fleet_button,
+            ):
+                if button is not None:
+                    button.rect = pygame.Rect(0, 0, 1, 1)
         table_y = self.dropdown.rect.bottom + round(8 * scale)
         reserved_details_height = round(
             (
@@ -650,6 +960,8 @@ class GameWindow:
             self.dropdown.options = self._dropdown_options()
             self.dropdown.selected = self.dropdown.options[0]
         if self.tabs.active == "CHRONICLE":
+            return
+        if self.tabs.active == "EMPIRE":
             return
         query = self.search.text.casefold().strip()
         category = self.dropdown.selected
@@ -1099,6 +1411,12 @@ class GameWindow:
         return [(obj.name, obj.kind, obj.world_type) for obj in system.objects]
 
     def _dropdown_options(self) -> list[str]:
+        if self.tabs is not None and self.tabs.active == "EMPIRE":
+            campaign = self.application.campaign
+            return [
+                campaign.game_content.buildings[building_id].name
+                for building_id in campaign.building_options()
+            ]
         if self.tabs is not None and self.tabs.active == "SYSTEM":
             kinds = dict.fromkeys(
                 obj.kind
@@ -1151,6 +1469,19 @@ class GameWindow:
                 self.dropdown,
                 self.systems,
                 self.action_button,
+                *common[1:],
+            ]
+        elif self.tabs.active == "EMPIRE":
+            assert self.research_button is not None
+            assert self.create_fleet_button is not None
+            assert self.move_fleet_button is not None
+            self._widgets = [
+                self.tabs,
+                self.dropdown,
+                self.action_button,
+                self.research_button,
+                self.create_fleet_button,
+                self.move_fleet_button,
                 *common[1:],
             ]
         else:
@@ -1435,9 +1766,15 @@ class GameWindow:
 
         if self._show_fleets:
             for fleet in campaign.fleets:
-                if self._fog_of_war and fleet.system_id not in sensor_system_ids:
+                if (
+                    self._fog_of_war
+                    and fleet.system_id not in sensor_system_ids
+                    and (not fleet.route or fleet.route[0] not in sensor_system_ids)
+                ):
                     continue
-                fleet_position = self._map_position(fleet.system_id)
+                fleet_position = self._galaxy_position(
+                    *campaign.fleet_position(fleet)
+                )
                 pygame.draw.polygon(
                     self.screen,
                     (110, 231, 245),
@@ -2177,6 +2514,176 @@ class GameWindow:
                 break
         self.screen.set_clip(previous_clip)
 
+    def _draw_empire(self, font: pygame.font.Font, compact: bool) -> None:
+        assert self.screen is not None
+        assert self.overview is not None
+        assert self.dropdown is not None
+        campaign = self.application.campaign
+        theme = self.ui.theme
+        rect = self.overview.rect
+        image_size = 50 if compact else 60
+        x = rect.x + 14
+        y = self.dropdown.rect.bottom + 10
+        species = campaign.species_catalog[campaign.player_species_id]
+        portrait = self._scaled_asset(species.portrait, (image_size, image_size))
+        emblem = self._scaled_asset("civilizations/union.svg", (image_size, 30))
+        self.screen.blit(portrait, (x, y))
+        self.screen.blit(emblem, (x + image_size + 8, y + 4))
+        self._label(
+            f"UNION  |  {species.name}",
+            (x + image_size + 8, y + 38),
+            self.ui.fonts.get(14),
+            theme.accent,
+        )
+        self._label(
+            f"LIFESPAN {species.lifespan_years} YEARS  |  {', '.join(species.traits)}",
+            (x + image_size + 8, y + 56),
+            self.ui.fonts.get(11),
+            theme.text,
+        )
+        y += image_size + 12
+        current_technology = (
+            campaign.game_content.technologies[campaign.active_technology]
+            if campaign.active_technology is not None
+            else None
+        )
+        lines = [
+            (
+                f"COLONIES {campaign.colonies}  |  "
+                f"POPULATION {campaign.player_population_billions:.2f}B  |  "
+                f"SPECIES {species.name}"
+            ),
+            (
+                f"STOCKPILES  A {campaign.alloys:.0f}  S {campaign.science:.0f}  "
+                f"E {campaign.energy:.0f}  F {campaign.food:.0f}  "
+                f"V {campaign.volatiles:.0f}"
+            ),
+            (
+                f"RESEARCH  {current_technology.name} "
+                f"{campaign.research_progress:.0f}/{current_technology.cost:.0f}"
+                if current_technology
+                else f"RESEARCH POINTS {campaign.research_points:.1f}  |  No active project"
+            ),
+        ]
+        for colony in campaign.player_colonies:
+            system = campaign.get_system(colony.system_id)
+            planet = campaign.get_object(colony.system_id, colony.planet_id)
+            buildings = ", ".join(
+                campaign.game_content.buildings[item].name
+                for item in colony.buildings
+            ) or "No buildings"
+            if colony.construction:
+                building = campaign.game_content.buildings[colony.construction].name
+                buildings += f"  |  Building {building} ({colony.construction_days_remaining:.0f}d)"
+            lines.append(
+                f"{system.name} / {planet.name}: {colony.population_billions:.2f}B "
+                f"| {colony.happiness:.0%} approval | {buildings}"
+            )
+        for fleet in campaign.fleets:
+            destination = (
+                f" -> {campaign.get_system(fleet.destination_id).name}"
+                if fleet.destination_id
+                else " | idle"
+            )
+            lines.append(
+                f"FLEET {fleet.name}: {fleet.ship_count} ships at "
+                f"{campaign.get_system(fleet.system_id).name}{destination}"
+            )
+        rival_emblems: dict[str, str] = {}
+        for empire in campaign.ai_empires:
+            profile = campaign.species_catalog[empire.species_id]
+            rival_emblems[empire.name] = f"civilizations/{empire.species_id}.svg"
+            lines.append(
+                f"RIVAL {empire.name} ({profile.name})  |  "
+                f"{len(empire.system_ids)} systems"
+            )
+        content_bottom = min(
+            self.create_fleet_button.rect.y
+            if self.create_fleet_button is not None
+            else rect.bottom,
+            rect.bottom - 8,
+        )
+        old_clip = self.screen.get_clip()
+        self.screen.set_clip(pygame.Rect(x, y, rect.width - 26, max(1, content_bottom - y)))
+        for index, line in enumerate(lines):
+            line_x = x
+            line_y = y + index * 36
+            if line.startswith("RIVAL "):
+                empire_name = line.split("(", 1)[0].removeprefix("RIVAL ").strip()
+                emblem_path = rival_emblems.get(empire_name)
+                if emblem_path:
+                    emblem = self._scaled_asset(emblem_path, (32, 16))
+                    self.screen.blit(emblem, (x, line_y + 2))
+                    line_x += 38
+            wrapped = self._wrap_text(font, line, rect.width - 30 - (line_x - x))
+            for line_index, text in enumerate(wrapped[:2]):
+                text_y = line_y + line_index * 16
+                color = theme.warning if line.startswith("RIVAL") else theme.text
+                self._label(text, (line_x, text_y), self.ui.fonts.get(12), color)
+        self.screen.set_clip(old_clip)
+        self.dropdown.options = self._dropdown_options()
+        if self.dropdown.options and self.dropdown.selected not in self.dropdown.options:
+            self.dropdown.selected = self.dropdown.options[0]
+        self.dropdown.draw(self.screen, self.ui.fonts.get(13), theme)
+
+    def _research_button_label(self) -> str:
+        campaign = self.application.campaign
+        if campaign.active_technology is None:
+            return "START RESEARCH"
+        technology = campaign.game_content.technologies[campaign.active_technology]
+        percent = min(100, round(campaign.research_progress / technology.cost * 100))
+        return f"RESEARCH {percent}%"
+
+    def _selected_colony(self) -> tuple[str, str]:
+        campaign = self.application.campaign
+        system = campaign.get_system(self._selected_system)
+        selected = campaign.colony_states.get(
+            campaign.colony_key(system.system_id, self._selected_object)
+        )
+        if selected is not None and system.owner == "Union":
+            return selected.system_id, selected.planet_id
+        if campaign.player_colonies:
+            colony = campaign.player_colonies[0]
+            return colony.system_id, colony.planet_id
+        raise ValueError("Found a colony before ordering construction")
+
+    def _start_next_research(self) -> None:
+        campaign = self.application.campaign
+        if campaign.active_technology is not None:
+            self.ui.notify("A research project is already active")
+            return
+        available = campaign.available_technologies()
+        if not available:
+            self.ui.notify("All available technologies have been researched")
+            return
+        try:
+            message = campaign.start_research(available[0])
+        except ValueError as error:
+            self.ui.notify(str(error))
+            return
+        self.ui.notify(message)
+
+    def _create_fleet(self) -> None:
+        try:
+            fleet = self.application.campaign.create_fleet()
+        except ValueError as error:
+            self.ui.notify(str(error))
+            return
+        self.ui.notify(f"Commissioned {fleet.name}")
+
+    def _move_fleet_to_selection(self) -> None:
+        campaign = self.application.campaign
+        fleet = next((item for item in campaign.fleets if not item.route), None)
+        if fleet is None:
+            self.ui.notify("No idle fleet is available")
+            return
+        try:
+            message = campaign.move_fleet(fleet.fleet_id, self._selected_system)
+        except (KeyError, ValueError) as error:
+            self.ui.notify(str(error))
+            return
+        self.ui.notify(message)
+
     @staticmethod
     def _wrap_text(font: pygame.font.Font, text: str, max_width: int) -> list[str]:
         words = text.split()
@@ -2194,6 +2701,32 @@ class GameWindow:
         return lines
 
     def _perform_selected_action(self) -> None:
+        if self.tabs is not None and self.tabs.active == "EMPIRE":
+            assert self.dropdown is not None
+            campaign = self.application.campaign
+            building = next(
+                (
+                    definition
+                    for definition in campaign.game_content.buildings.values()
+                    if definition.name == self.dropdown.selected
+                ),
+                None,
+            )
+            if building is None:
+                self.ui.notify("Select an available building")
+                return
+            try:
+                system_id, planet_id = self._selected_colony()
+                message = campaign.build_building(
+                    system_id,
+                    planet_id,
+                    building.building_id,
+                )
+            except (KeyError, ValueError) as error:
+                self.ui.notify(str(error))
+                return
+            self.ui.notify(message)
+            return
         try:
             if self.tabs is not None and self.tabs.active == "SYSTEM":
                 message = self.application.campaign.perform_object_action(
@@ -2284,6 +2817,7 @@ class GameWindow:
         self.screen = pygame.display.set_mode(size, flags)
         self._update_bounds()
         self._layout_ui()
+        self._layout_menu()
 
     def _label(
         self,

@@ -1,11 +1,13 @@
 """Application lifecycle."""
 
 import logging
+from pathlib import Path
 
-from .config import Config
 from .campaign import Campaign
+from .config import Config
 from .content import ContentCatalog, FactionDefinition, NationDefinition
 from .engine import GameEngine
+from .persistence import load_campaign, save_campaign
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +23,35 @@ class Application:
             size=config.galaxy_size,
             shape=config.galaxy_shape,
             galaxy_name=config.galaxy_name,
+            content_path=config.content_path,
         )
         self.content = ContentCatalog(config.content_path)
         self.factions: dict[str, FactionDefinition] = self.content.factions
         self.nations: dict[str, NationDefinition] = self.content.nations
         self._running = False
+
+    @property
+    def quick_save_path(self) -> Path:
+        return self.config.save_path / "quick-save.json"
+
+    def new_game(self, player_species_id: str = "union-human") -> None:
+        self.campaign = Campaign(
+            seed=self.config.galaxy_seed,
+            size=self.config.galaxy_size,
+            shape=self.config.galaxy_shape,
+            galaxy_name=self.config.galaxy_name,
+            player_species_id=player_species_id,
+            content_path=self.config.content_path,
+        )
+
+    def save_game(self, path: Path | None = None) -> None:
+        save_campaign(path or self.quick_save_path, self.campaign)
+
+    def load_game(self, path: Path | None = None) -> None:
+        self.campaign = load_campaign(
+            path or self.quick_save_path,
+            self.config.content_path,
+        )
 
     def start(self) -> None:
         """Start the application and perform initial setup."""

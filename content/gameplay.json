@@ -1,0 +1,88 @@
+{
+  "buildings": [
+    {
+      "id": "hydroponics",
+      "name": "Hydroponics Bay",
+      "cost_alloys": 12,
+      "energy_upkeep": 0.05,
+      "jobs": 2,
+      "days_to_build": 18,
+      "production": {"food": 0.65},
+      "prerequisites": []
+    },
+    {
+      "id": "mining",
+      "name": "Mining District",
+      "cost_alloys": 18,
+      "energy_upkeep": 0.08,
+      "jobs": 2,
+      "days_to_build": 24,
+      "production": {"alloys": 0.4, "volatiles": 0.06},
+      "prerequisites": []
+    },
+    {
+      "id": "research",
+      "name": "Research Institute",
+      "cost_alloys": 20,
+      "energy_upkeep": 0.12,
+      "jobs": 3,
+      "days_to_build": 28,
+      "production": {"research": 0.38},
+      "prerequisites": []
+    },
+    {
+      "id": "fusion",
+      "name": "Fusion Plant",
+      "cost_alloys": 16,
+      "energy_upkeep": 0.0,
+      "jobs": 2,
+      "days_to_build": 22,
+      "production": {"energy": 0.7},
+      "prerequisites": ["fusion-power"]
+    },
+    {
+      "id": "shipyard",
+      "name": "Orbital Shipyard",
+      "cost_alloys": 30,
+      "energy_upkeep": 0.18,
+      "jobs": 3,
+      "days_to_build": 36,
+      "production": {},
+      "prerequisites": ["orbital-engineering"]
+    }
+  ],
+  "technologies": [
+    {
+      "id": "field-survey",
+      "name": "Deep-Field Survey",
+      "category": "Physics",
+      "cost": 36,
+      "prerequisites": [],
+      "description": "Improve orbital scans and unlock advanced stellar analysis."
+    },
+    {
+      "id": "fusion-power",
+      "name": "Controlled Fusion",
+      "category": "Engineering",
+      "cost": 48,
+      "prerequisites": ["field-survey"],
+      "description": "Unlock compact fusion plants for frontier colonies."
+    },
+    {
+      "id": "orbital-engineering",
+      "name": "Orbital Engineering",
+      "category": "Engineering",
+      "cost": 55,
+      "prerequisites": ["field-survey"],
+      "description": "Unlock orbital shipyards and advanced fleet construction."
+    },
+    {
+      "id": "xeno-biology",
+      "name": "Xenobiology",
+      "category": "Society",
+      "cost": 42,
+      "prerequisites": ["field-survey"],
+      "description": "Improve colony adaptation and population health."
+    }
+  ]
+}

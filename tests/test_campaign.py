@@ -76,6 +76,113 @@ def test_campaign_income_advances_only_with_simulated_time() -> None:
         campaign.advance(-1)
 
 
+def test_species_choice_drives_colonist_biology() -> None:
+    campaign = Campaign(player_species_id="auralith")
+    colony = campaign.player_colonies[0]
+
+    assert colony.species_id == "auralith"
+    assert campaign.species_catalog[colony.species_id].lifespan_years == 240
+
+
+def test_population_growth_uses_species_rate_and_planet_capacity() -> None:
+    campaign = Campaign()
+    colony = campaign.player_colonies[0]
+    planet = campaign.get_object(colony.system_id, colony.planet_id)
+    initial_population = colony.population_billions
+
+    campaign.advance(365)
+
+    assert colony.population_billions > initial_population
+    assert colony.population_billions <= planet.population_capacity_billions
+    assert colony.happiness > 0
+
+
+def test_building_construction_spends_alloys_and_adds_production() -> None:
+    campaign = Campaign()
+    colony = campaign.player_colonies[0]
+    initial_alloys = campaign.alloys
+    initial_food = campaign.food
+
+    campaign.build_building(colony.system_id, colony.planet_id, "hydroponics")
+
+    assert campaign.alloys == initial_alloys - 12
+    assert colony.construction == "hydroponics"
+    campaign.advance(18)
+    assert "hydroponics" in colony.buildings
+    campaign.advance(1)
+    assert campaign.food > initial_food
+
+
+def test_research_unlocks_technology_and_gates_buildings() -> None:
+    campaign = Campaign()
+    colony = campaign.player_colonies[0]
+
+    with pytest.raises(ValueError, match="Required technology"):
+        campaign.build_building(colony.system_id, colony.planet_id, "fusion")
+    campaign.build_building(colony.system_id, colony.planet_id, "research")
+    campaign.advance(28)
+    campaign.start_research("field-survey")
+    campaign.advance(100)
+
+    assert "field-survey" in campaign.researched_technologies
+    assert campaign.start_research("fusion-power") == "Research begun: Controlled Fusion."
+    campaign.advance(130)
+    assert "fusion" in campaign.building_options()
+    assert "shipyard" not in campaign.building_options()
+
+
+def test_fleets_follow_routes_and_arrive_at_the_ordered_system() -> None:
+    campaign = Campaign()
+    fleet = campaign.fleets[0]
+
+    campaign.move_fleet(fleet.fleet_id, "asterion")
+    total_days = fleet.days_to_arrival
+    previous = fleet.system_id
+    for next_system in fleet.route:
+        total_days += campaign._jump_duration(previous, next_system)
+        previous = next_system
+    campaign.advance(total_days + 1)
+
+    assert fleet.system_id == "asterion"
+    assert fleet.route == []
+
+
+def test_fleet_position_changes_during_interstellar_travel() -> None:
+    campaign = Campaign()
+    fleet = campaign.fleets[0]
+    campaign.move_fleet(fleet.fleet_id, "asterion")
+    initial_position = campaign.fleet_position(fleet)
+
+    campaign.advance(fleet.days_to_arrival / 2)
+
+    assert campaign.fleet_position(fleet) != initial_position
+    assert fleet.system_id == "sol"
+
+
+def test_player_can_commission_fleets_with_a_valid_cost() -> None:
+    campaign = Campaign()
+    initial_alloys = campaign.alloys
+
+    fleet = campaign.create_fleet("Second Survey Group")
+
+    assert fleet.name == "Second Survey Group"
+    assert fleet.ship_count > 0
+    assert len(campaign.fleets) == 2
+    assert campaign.alloys == initial_alloys - 35
+
+
+def test_ai_empire_expands_deterministically() -> None:
+    first = Campaign(seed=238)
+    second = Campaign(seed=238)
+    initial_systems = len(first.ai_empires[0].system_ids)
+
+    first.advance(400)
+    second.advance(400)
+
+    assert len(first.ai_empires[0].system_ids) == initial_systems + 1
+    assert first.ai_empires[0].system_ids == second.ai_empires[0].system_ids
+
+
 def test_each_system_contains_multiple_individual_objects() -> None:
     campaign = Campaign()
 
@@ -136,6 +243,17 @@ def test_habitable_object_can_be_colonized_independently() -> None:
     assert target.owner == "Union"
     assert campaign.get_system("asterion").owner == "Union"
     assert any("Colony founded" in event for event in target.history)
+
+
+def test_player_cannot_colonize_a_rival_empire_system() -> None:
+    campaign = Campaign()
+    rival = campaign.get_system("morrow")
+    target = next(planet for planet in rival.planets if planet.habitable)
+    target.surveyed = True
+    target.colonized = False
+
+    with pytest.raises(ValueError, match="controlled by Veyran Compact"):
+        campaign.perform_object_action(rival.system_id, target.object_id)
 
 
 def test_planetary_data_includes_environment_gravity_and_population_capacity() -> None:

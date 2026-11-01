@@ -1,0 +1,91 @@
+{
+  "species": [
+    {
+      "id": "union-human",
+      "name": "Human",
+      "classification": ["Humanoid", "Human"],
+      "lifespan_years": 92,
+      "annual_growth_rate": 0.012,
+      "preferred_climates": ["Temperate", "Ocean", "Jungle"],
+      "needs": ["Food", "Energy", "Housing"],
+      "traits": ["Adaptable", "Curious"],
+      "portrait": "species/union-human.svg",
+      "names": {
+        "all": {
+          "given": ["Mara", "Soren", "Talia", "Ilan"],
+          "family": ["Voss", "Arden", "Kade", "Navarro"]
+        },
+        "humanoid": {
+          "given": ["Mara", "Soren", "Talia", "Ilan"],
+          "family": ["Voss", "Arden", "Kade", "Navarro"]
+        },
+        "human": {
+          "given": ["Mara", "Soren", "Talia", "Ilan"],
+          "family": ["Voss", "Arden", "Kade", "Navarro"]
+        },
+        "slavic": {
+          "given": ["Anya", "Mikhail", "Vera", "Yuri"],
+          "family": ["Volkov", "Moroz", "Petrov", "Sokolov"]
+        },
+        "uralic": {
+          "given": ["Aino", "Eero", "Ilona", "Miklos"],
+          "family": ["Kovacs", "Nagy", "Virtanen", "Toth"]
+        },
+        "hungarian": {
+          "given": ["Ilona", "Miklos", "Eszter", "Bela"],
+          "family": ["Kovacs", "Nagy", "Toth", "Varga"]
+        },
+        "latin": {
+          "given": ["Aurelia", "Cassian", "Livia", "Marcus"],
+          "family": ["Aquila", "Marcellus", "Severus", "Valerius"]
+        },
+        "roman": {
+          "given": ["Aurelia", "Cassian", "Livia", "Marcus"],
+          "family": ["Aquila", "Marcellus", "Severus", "Valerius"]
+        }
+      }
+    },
+    {
+      "id": "auralith",
+      "name": "Auralith",
+      "classification": ["Crystalline", "Resonant"],
+      "lifespan_years": 240,
+      "annual_growth_rate": 0.006,
+      "preferred_climates": ["Arid", "Temperate"],
+      "needs": ["Minerals", "Stable temperature", "Resonance"],
+      "traits": ["Long-lived", "Resonant memory"],
+      "portrait": "species/auralith.svg",
+      "names": {
+        "all": {
+          "given": ["Irix", "Oruun", "Saeli", "Vey"],
+          "family": ["Prism", "Lattice", "Chime", "Spire"]
+        },
+        "crystalline": {
+          "given": ["Irix", "Oruun", "Saeli", "Vey"],
+          "family": ["Prism", "Lattice", "Chime", "Spire"]
+        }
+      }
+    },
+    {
+      "id": "veyra",
+      "name": "Veyran",
+      "classification": ["Amphibious", "Veyran"],
+      "lifespan_years": 118,
+      "annual_growth_rate": 0.009,
+      "preferred_climates": ["Ocean", "Jungle"],
+      "needs": ["Food", "Water", "Humidity"],
+      "traits": ["Aquatic", "Communal"],
+      "portrait": "species/veyra.svg",
+      "names": {
+        "all": {
+          "given": ["Neris", "Thalen", "Osha", "Vael"],
+          "family": ["Mire", "Tide", "Reef", "Current"]
+        },
+        "amphibious": {
+          "given": ["Neris", "Thalen", "Osha", "Vael"],
+          "family": ["Mire", "Tide", "Reef", "Current"]
+        }
+      }
+    }
+  ]
+}

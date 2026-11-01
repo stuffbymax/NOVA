@@ -10,7 +10,11 @@ SVG_NAMESPACE = "{http://www.w3.org/2000/svg}"
 
 
 def main() -> None:
-    assets = sorted(ASSET_DIR.glob("*.svg"))
+    assets = sorted(
+        path
+        for path in ASSET_DIR.rglob("*.svg")
+        if "generated examples" not in path.parts
+    )
     if not assets:
         raise SystemExit(f"No SVG assets found in {ASSET_DIR}")
 

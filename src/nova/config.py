@@ -13,6 +13,7 @@ class Config:
     log_level: str = "INFO"
     content_path: Path = Path("content")
     asset_path: Path = Path("assets")
+    save_path: Path = Path("saves")
     galaxy_seed: int = 2480
     galaxy_size: str = "medium"
     galaxy_shape: str = "spiral"
@@ -36,6 +37,7 @@ def load_config(path: Path | None = None) -> Config:
         log_level=str(data.get("log_level", "INFO")).upper(),
         content_path=Path(str(data.get("content_path", "content"))),
         asset_path=Path(str(data.get("asset_path", "assets"))),
+        save_path=Path(str(data.get("save_path", "saves"))),
         galaxy_seed=int(data.get("galaxy_seed", 2480)),
         galaxy_size=str(data.get("galaxy_size", "medium")).casefold(),
         galaxy_shape=str(data.get("galaxy_shape", "spiral")).casefold(),

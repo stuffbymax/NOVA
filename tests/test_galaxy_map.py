@@ -111,14 +111,18 @@ def test_territory_layer_draws_regions_for_owned_systems(
     polygons, borders = window._territory_geometry(bounds)
 
     assert polygons
-    assert all(owner == "Union" for owner, _ in polygons)
+    assert {owner for owner, _ in polygons} >= {"Union", "Veyran Compact"}
     assert borders
     assert window._owner_route_edges()["Union"]
     window._draw_territory_layer(bounds, window.application.campaign.systems)
 
     window.application.campaign.get_system("new-carthage").owner = "Sovereign Reach"
     polygons, _ = window._territory_geometry(bounds)
-    assert {owner for owner, _ in polygons} == {"Union", "Sovereign Reach"}
+    assert {owner for owner, _ in polygons} == {
+        "Union",
+        "Sovereign Reach",
+        "Veyran Compact",
+    }
     window._draw_territory_layer(bounds, window.application.campaign.systems)
 
 
@@ -219,6 +223,48 @@ def test_planet_management_and_history_views_render(game_window: GameWindow) -> 
 
     window._planet_view = "DETAILS"
     window._draw_object_details(window.ui.fonts.get(18), compact=False)
+
+
+def test_empire_screen_builds_and_renders_species_art(game_window: GameWindow) -> None:
+    window = game_window
+    assert window.tabs is not None
+    assert window.dropdown is not None
+    window.tabs.active = "EMPIRE"
+    window._filter_content()
+    window._layout_ui()
+
+    window._draw_empire(window.ui.fonts.get(14), compact=False)
+    window.dropdown.selected = "Hydroponics Bay"
+    window._perform_selected_action()
+
+    assert window.application.campaign.player_colonies[0].construction == "hydroponics"
+    assert window.research_button is not None
+    assert window.create_fleet_button is not None
+    assert window.move_fleet_button is not None
+
+
+def test_main_menu_renders_portraits_and_starts_selected_species(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    clock = SimpleNamespace(
+        pause=lambda: None,
+        resume=lambda: None,
+    )
+    window.application.engine = SimpleNamespace(clock=clock)
+    window.application.new_game = lambda species_id: setattr(
+        window.application,
+        "campaign",
+        Campaign(player_species_id=species_id),
+    )
+
+    window._show_main_menu()
+    window._selected_species_id = "auralith"
+    window._draw()
+    window._start_new_game()
+
+    assert not window._menu_active
+    assert window.application.campaign.player_species_id == "auralith"
 
 
 def test_planet_management_and_history_keyboard_controls(

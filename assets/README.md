@@ -18,6 +18,8 @@ The active art includes:
 
 - a galaxy background at `galaxy-background.svg`
 - an ancient gateway illustration at `Anomalies/ancient gateway.jpg`
+- three original species portraits under `species/`
+- civilization emblems under `civilizations/`
 - additional content-specific art can be added directly under `assets/`
 
 These are original 2D illustrations with layered shading and 3D-like
