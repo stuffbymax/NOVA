@@ -117,43 +117,43 @@
 
 ## 6. Galaxy Map
 
-- [ ] Implement 2D galaxy map
-- [ ] Implement star rendering
-- [ ] Implement system selection
-- [ ] Implement mouse navigation
-- [ ] Implement zooming
-- [ ] Implement panning
-- [ ] Implement system information panels
-- [ ] Implement political borders
-- [ ] Implement territory ownership
-- [ ] Implement fleet markers
-- [ ] Implement trade route overlays
-- [ ] Implement resource overlays
-- [ ] Implement sensor overlays
-- [ ] Implement fog of war
-- [ ] Implement exploration overlays
-- [ ] Implement map search
-- [ ] Implement map filters
-- [ ] Implement map bookmarks
+- [✔ ] Implement 2D galaxy map
+- [✔ ] Implement star rendering
+- [✔ ] Implement system selection
+- [✔ ] Implement mouse navigation
+- [✔ ] Implement zooming
+- [✔ ] Implement panning
+- [✔ ] Implement system information panels
+- [✔ ] Implement political borders
+- [✔ ] Implement territory ownership
+- [✔ ] Implement fleet markers
+- [✔ ] Implement trade route overlays
+- [✔ ] Implement resource overlays
+- [✔ ] Implement sensor overlays
+- [✔ ] Implement fog of war
+- [✔ ] Implement exploration overlays
+- [✔ ] Implement map search
+- [✔ ] Implement map filters
+- [✔ ] Implement map bookmarks
 
 ## 7. Star Systems and Planets
 
-- [ ] Implement star system data model
-- [ ] Implement planetary data model
-- [ ] Implement planetary characteristics
-- [ ] Implement planetary climates
-- [ ] Implement gravity
-- [ ] Implement atmosphere
-- [ ] Implement surface conditions
-- [ ] Implement planetary resources
-- [ ] Implement planetary habitability
-- [ ] Implement planetary population capacity
-- [ ] Implement moons
-- [ ] Implement planetary orbit information
-- [ ] Implement system ownership
-- [ ] Implement planetary ownership
-- [ ] Implement planetary management screen
-- [ ] Implement planetary history
+- [✔ ] Implement star system data model
+- [✔ ] Implement planetary data model
+- [✔ ] Implement planetary characteristics
+- [✔ ] Implement planetary climates
+- [✔ ] Implement gravity
+- [✔ ] Implement atmosphere
+- [✔ ] Implement surface conditions
+- [✔ ] Implement planetary resources
+- [✔ ] Implement planetary habitability
+- [✔ ] Implement planetary population capacity
+- [✔ ] Implement moons
+- [✔ ] Implement planetary orbit information
+- [✔ ] Implement system ownership
+- [✔ ] Implement planetary ownership
+- [✔ ] Implement planetary management screen
+- [✔ ] Implement planetary history
 
 ## 8. Species and Biology
 
@@ -476,6 +476,9 @@
 - [ ] Implement custom technology mods
 - [ ] Implement custom events
 - [ ] Implement custom scenarios
+- [ ] Implement custom AI scripts
+- [ ] Implement custom UI themes
+- [ ] Implement mod configuration options
 - [ ] Implement Python scripting API
 - [ ] Implement mod permissions and sandboxing
 - [ ] Implement mod error reporting

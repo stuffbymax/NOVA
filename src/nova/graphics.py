@@ -1,5 +1,6 @@
 """Pygame window and the first interactive NOVA map presentation."""
 
+from collections import deque
 import logging
 import math
 
@@ -45,11 +46,28 @@ class GameWindow:
         self._speed_index = 1
         self._selected_system = "sol"
         self._selected_object = "earth"
+        self._planet_view = "DETAILS"
         self._active_tab = "GALAXY"
         self._galaxy_zoom = 0.9
         self._system_zoom = 0.92
         self._map_pan = pygame.Vector2()
         self._map_dragging = False
+        self._show_borders = True
+        self._show_fleets = True
+        self._show_trade_routes = True
+        self._show_resources = False
+        self._show_sensors = False
+        self._fog_of_war = False
+        self._show_exploration = False
+        self._territory_cache_key: tuple[object, ...] | None = None
+        self._territory_polygons: list[
+            tuple[str, tuple[tuple[float, float], ...]]
+        ] = []
+        self._territory_edges: list[
+            tuple[str, tuple[float, float], tuple[float, float]]
+        ] = []
+        self._owner_route_cache_key: tuple[object, ...] | None = None
+        self._owner_route_cache: dict[str, set[tuple[str, str]]] = {}
         self._nebula_cache: dict[
             tuple[tuple[int, int], tuple[int, int, int]], pygame.Surface
         ] = {}
@@ -156,6 +174,61 @@ class GameWindow:
                     self._toggle_contrast()
                     continue
                 if (
+                    event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)
+                    and self.tabs is not None
+                    and self.tabs.active == "GALAXY"
+                    and self.search is not None
+                    and self.search.focused
+                    and self.search.text.strip()
+                ):
+                    self._search_map()
+                    continue
+                if (
+                    self.tabs is not None
+                    and self.tabs.active == "GALAXY"
+                    and not self._text_input_focused()
+                ):
+                    if event.key == pygame.K_b and event.mod & pygame.KMOD_CTRL:
+                        self._toggle_map_bookmark()
+                        continue
+                    if event.key == pygame.K_b:
+                        self._jump_to_next_bookmark()
+                        continue
+                    map_layers = {
+                        pygame.K_p: "_show_borders",
+                        pygame.K_t: "_show_trade_routes",
+                        pygame.K_r: "_show_resources",
+                        pygame.K_s: "_show_sensors",
+                        pygame.K_f: "_fog_of_war",
+                        pygame.K_e: "_show_exploration",
+                    }
+                    layer = map_layers.get(event.key)
+                    if layer is not None:
+                        setattr(self, layer, not getattr(self, layer))
+                        if event.key == pygame.K_f:
+                            if self._fog_of_war:
+                                sensor_system_ids = self._sensor_system_ids()
+                                selected = self.application.campaign.get_system(
+                                    self._selected_system
+                                )
+                                if not self._is_system_visible(
+                                    selected,
+                                    sensor_system_ids,
+                                ):
+                                    self._selected_system = next(
+                                        system.system_id
+                                        for system in self.application.campaign.systems
+                                        if self._is_system_visible(
+                                            system,
+                                            sensor_system_ids,
+                                        )
+                                    )
+                                    self._set_selected_map_system(
+                                        self._selected_system
+                                    )
+                            self._filter_content()
+                        continue
+                if (
                     event.key == pygame.K_HOME
                     and self.tabs is not None
                     and not self._text_input_focused()
@@ -184,6 +257,17 @@ class GameWindow:
                 if self._text_input_focused():
                     self.ui.handle_event(event, self._widgets)
                     self._filter_content()
+                    continue
+                if (
+                    self.tabs is not None
+                    and self.tabs.active == "SYSTEM"
+                    and event.key in (pygame.K_m, pygame.K_h, pygame.K_d)
+                ):
+                    self._planet_view = {
+                        pygame.K_m: "MANAGEMENT",
+                        pygame.K_h: "HISTORY",
+                        pygame.K_d: "DETAILS",
+                    }[event.key]
                     continue
                 if event.key == pygame.K_SPACE:
                     self._toggle_pause()
@@ -304,23 +388,17 @@ class GameWindow:
 
         if self.tabs.active == "SYSTEM":
             help_text = (
-                "Click body  |  wheel zoom  |  BACKSPACE galaxy"
-                if width < 900
-                else (
-                    "Click a body to inspect  |  wheel zoom  |  "
-                    "BACKSPACE galaxy  |  SPACE pause"
-                )
+                "Click body  |  M manage  H history  D details  |  BACKSPACE galaxy"
             )
         else:
             help_text = (
-                "Select star  |  wheel zoom  |  HOME reset"
-                if width < 900
-                else (
-                    "Click a star to inspect  |  wheel zoom  |  "
-                    "right-drag pan when zoomed  |  HOME reset  |  SPACE pause"
-                )
+                "Click star  |  wheel zoom  |  right-drag pan  |  Home reset  |  "
+                "P borders  T trade  R resources  S sensors  F fog  E explore  "
+                "Ctrl+B bookmark  B next  Space pause"
             )
-        help_font = self.ui.fonts.get(13) if width < 900 else small_font
+        help_font = self.ui.fonts.get(11) if self.tabs.active == "GALAXY" else (
+            self.ui.fonts.get(13) if width < 900 else small_font
+        )
         self._label(help_text, (18, height - 22), help_font, theme.muted)
         self.ui.draw_overlays(self.screen, small_font, small_font)
 
@@ -522,7 +600,20 @@ class GameWindow:
         )
         table_y = self.dropdown.rect.bottom + round(8 * scale)
         reserved_details_height = round(
-            (160 if self.tabs is not None and self.tabs.active == "SYSTEM" else 72)
+            (
+                300
+                if self.tabs is not None
+                and self.tabs.active == "SYSTEM"
+                and self._planet_view == "HISTORY"
+                else 210
+                if self.tabs is not None
+                and self.tabs.active == "SYSTEM"
+                and self._planet_view == "MANAGEMENT"
+                else 220
+                if self.tabs is not None
+                and self.tabs.active == "SYSTEM"
+                else 72
+            )
             * scale
         )
         table_height = max(
@@ -562,6 +653,11 @@ class GameWindow:
             return
         query = self.search.text.casefold().strip()
         category = self.dropdown.selected
+        sensor_system_ids = (
+            self._sensor_system_ids()
+            if self.tabs.active == "GALAXY" and self._fog_of_war
+            else set()
+        )
         rows = (
             self._system_rows()
             if self.tabs.active == "GALAXY"
@@ -572,6 +668,18 @@ class GameWindow:
             for row in rows
             if (not query or query in " ".join(row).casefold())
             and (category == "All" or row[1] == category)
+            and (
+                self.tabs.active != "GALAXY"
+                or not self._fog_of_war
+                or self._is_system_visible(
+                    next(
+                        system
+                        for system in self.application.campaign.systems
+                        if system.name == row[0]
+                    ),
+                    sensor_system_ids,
+                )
+            )
         ]
         self.systems.set_rows(filtered)
 
@@ -588,11 +696,13 @@ class GameWindow:
                 system.objects[0],
             )
             self._selected_object = selected.object_id
+            self._planet_view = "DETAILS"
             self.ui.notify(f"Selected {system.name}")
             return
         system = self.application.campaign.get_system(self._selected_system)
         selected = next(obj for obj in system.objects if obj.name == row[0])
         self._selected_object = selected.object_id
+        self._planet_view = "DETAILS"
         self.ui.notify(f"Selected {selected.name}")
 
     def _system_rows(self) -> list[tuple[str, str, str]]:
@@ -600,6 +710,389 @@ class GameWindow:
             (system.name, system.status, system.world_type)
             for system in self.application.campaign.systems
         ]
+
+    def _sensor_system_ids(self) -> set[str]:
+        campaign = self.application.campaign
+        owned_ids = {
+            system.system_id
+            for system in campaign.systems
+            if system.owner == "Union"
+        }
+        sensor_ids = set(owned_ids)
+        for first_id, second_id in campaign.routes:
+            if first_id in owned_ids:
+                sensor_ids.add(second_id)
+            if second_id in owned_ids:
+                sensor_ids.add(first_id)
+        return sensor_ids
+
+    def _is_system_visible(
+        self,
+        system: StarSystem,
+        sensor_system_ids: set[str] | None = None,
+    ) -> bool:
+        return (
+            not self._fog_of_war
+            or system.surveyed
+            or system.system_id
+            in (
+                sensor_system_ids
+                if sensor_system_ids is not None
+                else self._sensor_system_ids()
+            )
+        )
+
+    def _map_filter_matches(self, system: StarSystem) -> bool:
+        if self.search is not None:
+            query = self.search.text.casefold().strip()
+            if query and query not in (
+                f"{system.name} {system.status} {system.world_type} {system.system_id}"
+            ).casefold():
+                return False
+        if (
+            self.dropdown is not None
+            and self.dropdown.selected not in ("", "All", system.status)
+        ):
+            return False
+        return True
+
+    def _trade_route_edges(self) -> set[tuple[str, str]]:
+        return self._owner_route_edges().get("Union", set())
+
+    def _owner_route_edges(self) -> dict[str, set[tuple[str, str]]]:
+        campaign = self.application.campaign
+        key: tuple[object, ...] = (
+            campaign.routes,
+            tuple((system.system_id, system.owner) for system in campaign.systems),
+        )
+        if key == self._owner_route_cache_key:
+            return self._owner_route_cache
+        adjacency: dict[str, list[str]] = {
+            system.system_id: [] for system in campaign.systems
+        }
+        for first_id, second_id in campaign.routes:
+            adjacency[first_id].append(second_id)
+            adjacency[second_id].append(first_id)
+        owned_by: dict[str, list[str]] = {}
+        for system in campaign.systems:
+            if system.owner is not None:
+                owned_by.setdefault(system.owner, []).append(system.system_id)
+        route_edges: dict[str, set[tuple[str, str]]] = {}
+        for owner, owned in owned_by.items():
+            trade_edges: set[tuple[str, str]] = set()
+            for source_index, source_id in enumerate(owned):
+                previous: dict[str, str | None] = {source_id: None}
+                frontier = deque([source_id])
+                while frontier:
+                    current_id = frontier.popleft()
+                    for neighbor_id in adjacency[current_id]:
+                        if neighbor_id not in previous:
+                            previous[neighbor_id] = current_id
+                            frontier.append(neighbor_id)
+                for target_id in owned[source_index + 1 :]:
+                    if target_id not in previous:
+                        continue
+                    current_id = target_id
+                    while previous[current_id] is not None:
+                        parent_id = previous[current_id]
+                        assert parent_id is not None
+                        trade_edges.add(tuple(sorted((parent_id, current_id))))
+                        current_id = parent_id
+            route_edges[owner] = trade_edges
+        self._owner_route_cache_key = key
+        self._owner_route_cache = route_edges
+        return self._owner_route_cache
+
+    def _territory_geometry(
+        self,
+        bounds: pygame.Rect,
+    ) -> tuple[
+        list[tuple[str, tuple[tuple[float, float], ...]]],
+        list[tuple[str, tuple[float, float], tuple[float, float]]],
+    ]:
+        systems = self.application.campaign.systems
+        key: tuple[object, ...] = (
+            bounds.size,
+            tuple(
+                (system.system_id, system.x, system.y, system.owner)
+                for system in systems
+            ),
+        )
+        if key == self._territory_cache_key:
+            return self._territory_polygons, self._territory_edges
+
+        sites = [
+            (
+                system,
+                (system.x - 0.5) * bounds.width,
+                (system.y - 0.5) * bounds.height,
+            )
+            for system in systems
+        ]
+        polygons: list[tuple[str, tuple[tuple[float, float], ...]]] = []
+        edge_owners: dict[
+            tuple[tuple[float, float], tuple[float, float]],
+            list[str],
+        ] = {}
+        for system, site_x, site_y in sites:
+            if system.owner is None:
+                continue
+            polygon: list[tuple[float, float]] = [
+                (-bounds.width / 2, -bounds.height / 2),
+                (bounds.width / 2, -bounds.height / 2),
+                (bounds.width / 2, bounds.height / 2),
+                (-bounds.width / 2, bounds.height / 2),
+            ]
+            for other, other_x, other_y in sites:
+                if other.system_id == system.system_id:
+                    continue
+                a = 2 * (other_x - site_x)
+                b = 2 * (other_y - site_y)
+                limit = other_x**2 + other_y**2 - site_x**2 - site_y**2
+                clipped: list[tuple[float, float]] = []
+                if not polygon:
+                    break
+                previous = polygon[-1]
+                previous_value = a * previous[0] + b * previous[1] - limit
+                for current in polygon:
+                    current_value = a * current[0] + b * current[1] - limit
+                    previous_inside = previous_value <= 1e-7
+                    current_inside = current_value <= 1e-7
+                    if previous_inside != current_inside:
+                        fraction = previous_value / (previous_value - current_value)
+                        clipped.append(
+                            (
+                                previous[0] + (current[0] - previous[0]) * fraction,
+                                previous[1] + (current[1] - previous[1]) * fraction,
+                            )
+                        )
+                    if current_inside:
+                        clipped.append(current)
+                    previous = current
+                    previous_value = current_value
+                polygon = clipped
+            if len(polygon) < 3:
+                continue
+            polygons.append((system.owner, tuple(polygon)))
+            for index, first in enumerate(polygon):
+                second = polygon[(index + 1) % len(polygon)]
+                normalized_first = (round(first[0], 3), round(first[1], 3))
+                normalized_second = (round(second[0], 3), round(second[1], 3))
+                edge_key = tuple(sorted((normalized_first, normalized_second)))
+                edge_owners.setdefault(edge_key, []).append(system.owner)
+
+        borders = [
+            (owners[0], edge[0], edge[1])
+            for edge, owners in edge_owners.items()
+            if len(owners) == 1 or len(set(owners)) > 1
+        ]
+        self._territory_cache_key = key
+        self._territory_polygons = polygons
+        self._territory_edges = borders
+        return polygons, borders
+
+    def _owner_color(
+        self,
+        owner: str,
+        owners: list[str],
+    ) -> tuple[int, int, int]:
+        if owner == "Union":
+            return (222, 169, 79)
+        palette = (
+            (92, 161, 219),
+            (180, 111, 201),
+            (79, 181, 139),
+            (212, 108, 108),
+        )
+        other_owners = sorted(entry for entry in owners if entry != "Union")
+        return palette[other_owners.index(owner) % len(palette)]
+
+    def _draw_territory_layer(
+        self,
+        bounds: pygame.Rect,
+        systems: list[StarSystem],
+    ) -> None:
+        assert self.screen is not None
+        polygons, _ = self._territory_geometry(bounds)
+        if not polygons:
+            return
+        owners = sorted({system.owner for system in systems if system.owner})
+        route_edges = self._owner_route_edges()
+        corridor_width = max(
+            28,
+            round(min(bounds.size) * 0.08 * self._galaxy_zoom),
+        )
+        for owner, polygon in polygons:
+            overlay = pygame.Surface(bounds.size, pygame.SRCALPHA)
+            points = [
+                (
+                    round(bounds.width / 2 + x * self._galaxy_zoom + self._map_pan.x),
+                    round(bounds.height / 2 + y * self._galaxy_zoom + self._map_pan.y),
+                )
+                for x, y in polygon
+            ]
+            pygame.draw.polygon(
+                overlay,
+                (*self._owner_color(owner, owners), 42),
+                points,
+            )
+            self.screen.blit(overlay, bounds.topleft)
+
+        for owner in owners:
+            overlay = pygame.Surface(bounds.size, pygame.SRCALPHA)
+            color = self._owner_color(owner, owners)
+            owner_systems = [
+                system for system in systems if system.owner == owner
+            ]
+            for system in owner_systems:
+                position = self._map_position(system.system_id)
+                center = position[0] - bounds.x, position[1] - bounds.y
+                pygame.draw.circle(
+                    overlay,
+                    (*color, 42),
+                    center,
+                    corridor_width // 2,
+                )
+            for first_id, second_id in route_edges.get(owner, set()):
+                start = self._map_position(first_id)
+                end = self._map_position(second_id)
+                start = start[0] - bounds.x, start[1] - bounds.y
+                end = end[0] - bounds.x, end[1] - bounds.y
+                pygame.draw.line(
+                    overlay,
+                    (*color, 42),
+                    start,
+                    end,
+                    corridor_width,
+                )
+                pygame.draw.circle(
+                    overlay,
+                    (*color, 42),
+                    start,
+                    corridor_width // 2,
+                )
+                pygame.draw.circle(
+                    overlay,
+                    (*color, 42),
+                    end,
+                    corridor_width // 2,
+                )
+            self.screen.blit(overlay, bounds.topleft)
+            outline = pygame.mask.from_surface(overlay, 1).outline(every=3)
+            if len(outline) > 2:
+                outline = [(x + bounds.x, y + bounds.y) for x, y in outline]
+                pygame.draw.lines(
+                    self.screen,
+                    (9, 13, 23),
+                    True,
+                    outline,
+                    8,
+                )
+                pygame.draw.lines(self.screen, color, True, outline, 5)
+
+        for owner in owners:
+            owned_systems = [
+                system for system in systems if system.owner == owner
+            ]
+            center = (
+                round(
+                    sum(self._map_position(system.system_id)[0] for system in owned_systems)
+                    / len(owned_systems)
+                ),
+                round(
+                    sum(self._map_position(system.system_id)[1] for system in owned_systems)
+                    / len(owned_systems)
+                ),
+            )
+            label = self.ui.fonts.get(18).render(
+                owner.upper(),
+                True,
+                self._owner_color(owner, owners),
+            )
+            label_rect = label.get_rect(center=center)
+            shadow = self.ui.fonts.get(18).render(owner.upper(), True, (10, 13, 20))
+            self.screen.blit(shadow, label_rect.move(2, 2))
+            self.screen.blit(label, label_rect)
+
+    def _toggle_map_bookmark(self) -> None:
+        bookmarks = self.application.campaign.map_bookmarks
+        if self._selected_system in bookmarks:
+            bookmarks.remove(self._selected_system)
+            self.ui.notify("Bookmark removed")
+        else:
+            bookmarks.append(self._selected_system)
+            self.ui.notify("System bookmarked")
+
+    def _set_selected_map_system(self, system_id: str) -> None:
+        system = self.application.campaign.get_system(system_id)
+        self._selected_system = system_id
+        self._planet_view = "DETAILS"
+        selected = next(
+            (obj for obj in system.objects if obj.habitable or obj.kind == "Planet"),
+            system.objects[0],
+        )
+        self._selected_object = selected.object_id
+
+    def _center_map_on(self, system_id: str) -> None:
+        position = self._map_position(system_id)
+        bounds = self._map_rect()
+        self._map_pan += pygame.Vector2(bounds.center) - pygame.Vector2(position)
+        self._clamp_map_pan()
+
+    def _jump_to_next_bookmark(self) -> None:
+        bookmarks = self.application.campaign.map_bookmarks
+        visible_bookmarks = [
+            system_id
+            for system_id in bookmarks
+            if self._is_system_visible(
+                self.application.campaign.get_system(system_id)
+            )
+        ]
+        if not visible_bookmarks:
+            self.ui.notify("No map bookmarks")
+            return
+        current_index = (
+            visible_bookmarks.index(self._selected_system)
+            if self._selected_system in visible_bookmarks
+            else -1
+        )
+        self._set_selected_map_system(
+            visible_bookmarks[(current_index + 1) % len(visible_bookmarks)]
+        )
+        self._center_map_on(self._selected_system)
+
+    def _search_map(self) -> bool:
+        assert self.search is not None
+        query = self.search.text.casefold().strip()
+        sensor_system_ids = (
+            self._sensor_system_ids() if self._fog_of_war else set()
+        )
+        matches = [
+            system
+            for system in self.application.campaign.systems
+            if (
+                query in system.name.casefold()
+                or query in system.system_id.casefold()
+            )
+            and self._map_filter_matches(system)
+            and self._is_system_visible(system, sensor_system_ids)
+        ]
+        if not matches:
+            self.ui.notify(f"No system matches '{self.search.text.strip()}'")
+            return False
+        system = min(
+            matches,
+            key=lambda entry: (
+                entry.name.casefold() != query,
+                not entry.name.casefold().startswith(query),
+                entry.name.casefold(),
+            ),
+        )
+        self._set_selected_map_system(system.system_id)
+        self._center_map_on(system.system_id)
+        self.search.focused = False
+        self.ui.notify(f"Located {system.name}")
+        return True
 
     def _object_rows(self) -> list[tuple[str, str, str]]:
         system = self.application.campaign.get_system(self._selected_system)
@@ -732,8 +1225,19 @@ class GameWindow:
     def _select_map_item(self, position: tuple[int, int]) -> bool:
         if self.tabs is not None and self.tabs.active == "SYSTEM":
             return self._select_system_object(position)
+        sensor_system_ids = (
+            self._sensor_system_ids() if self._fog_of_war else set()
+        )
+        candidates = [
+            system
+            for system in self.application.campaign.systems
+            if self._map_filter_matches(system)
+            and self._is_system_visible(system, sensor_system_ids)
+        ]
+        if not candidates:
+            return False
         nearest = min(
-            self.application.campaign.systems,
+            candidates,
             key=lambda system: pygame.Vector2(
                 self._map_position(system.system_id)
             ).distance_squared_to(position),
@@ -743,12 +1247,7 @@ class GameWindow:
             > 30**2
         ):
             return False
-        self._selected_system = nearest.system_id
-        selected = next(
-            (obj for obj in nearest.objects if obj.habitable or obj.kind == "Planet"),
-            nearest.objects[0],
-        )
-        self._selected_object = selected.object_id
+        self._set_selected_map_system(nearest.system_id)
         if self.tabs is not None:
             self.tabs.active = "SYSTEM"
             self._filter_content()
@@ -762,6 +1261,18 @@ class GameWindow:
         bounds = self._map_rect()
         campaign = self.application.campaign
         theme = self.ui.theme
+        territory_owners = sorted(
+            {system.owner for system in campaign.systems if system.owner is not None}
+        )
+        sensor_system_ids = self._sensor_system_ids()
+        visible_systems = [
+            system
+            for system in campaign.systems
+            if self._is_system_visible(system, sensor_system_ids)
+        ]
+        trade_route_edges = (
+            self._trade_route_edges() if self._show_trade_routes else set()
+        )
         previous_clip = self.screen.get_clip()
         self.screen.set_clip(bounds)
         nebula_colors = (
@@ -770,6 +1281,12 @@ class GameWindow:
             (44, 131, 146),
         )
         for index, nebula in enumerate(campaign.galaxy.nebulae):
+            if self._fog_of_war and not any(
+                math.dist((system.x, system.y), (nebula.x, nebula.y))
+                <= nebula.radius
+                for system in visible_systems
+            ):
+                continue
             position = self._galaxy_position(nebula.x, nebula.y)
             size = (
                 max(24, round(nebula.radius * bounds.width * 2.8)),
@@ -791,6 +1308,9 @@ class GameWindow:
                 self._nebula_cache[cache_key] = cloud
             self.screen.blit(cloud, cloud.get_rect(center=position))
 
+        if self._show_borders:
+            self._draw_territory_layer(bounds, campaign.systems)
+
         connections: set[str] = set()
         for first_id, second_id in campaign.routes:
             if first_id == self._selected_system:
@@ -801,6 +1321,13 @@ class GameWindow:
             selected_route = self._selected_system in (first_id, second_id)
             first = campaign.get_system(first_id)
             second = campaign.get_system(second_id)
+            if (
+                not self._is_system_visible(first, sensor_system_ids)
+                or not self._is_system_visible(second, sensor_system_ids)
+                or not self._map_filter_matches(first)
+                or not self._map_filter_matches(second)
+            ):
+                continue
             if selected_route:
                 route_color = (87, 205, 220)
             elif first.colonized or second.colonized:
@@ -814,8 +1341,24 @@ class GameWindow:
                 self._map_position(second_id),
                 2 if selected_route else 1,
             )
+            if (
+                self._show_trade_routes
+                and tuple(sorted((first_id, second_id))) in trade_route_edges
+            ):
+                pygame.draw.line(
+                    self.screen,
+                    (241, 195, 91),
+                    self._map_position(first_id),
+                    self._map_position(second_id),
+                    2,
+                )
         label_candidates: list[tuple[int, StarSystem, tuple[int, int]]] = []
         for system in campaign.systems:
+            if (
+                not self._is_system_visible(system, sensor_system_ids)
+                or not self._map_filter_matches(system)
+            ):
+                continue
             position = self._map_position(system.system_id)
             status_color = (
                 theme.accent
@@ -826,6 +1369,10 @@ class GameWindow:
             )
             radius = 8 if system.system_id == self._selected_system else 5
             pygame.draw.circle(self.screen, status_color, position, radius + 3, 1)
+            if self._show_sensors and system.system_id in sensor_system_ids:
+                pygame.draw.circle(self.screen, (78, 196, 228), position, radius + 7, 1)
+            if self._show_exploration and system.surveyed:
+                pygame.draw.circle(self.screen, (104, 223, 157), position, radius + 5, 2)
             system_kinds = {obj.kind for obj in system.objects}
             if "Gateway" in system_kinds:
                 pygame.draw.circle(self.screen, (255, 207, 123), position, radius + 6, 1)
@@ -847,12 +1394,31 @@ class GameWindow:
                 if system.companion_star_type is not None:
                     pygame.draw.circle(
                         self.screen,
-                        self._star_color(system.companion_star_type, color),
+                        self._star_color(system.companion_star_type, theme.warning),
                         (position[0] + radius, position[1] - radius),
                         max(2, radius // 2),
                     )
             if system.system_id == self._selected_system:
                 pygame.draw.circle(self.screen, theme.text, position, radius + 6, 1)
+            if system.system_id in campaign.map_bookmarks:
+                pygame.draw.circle(self.screen, (255, 220, 112), position, radius + 13, 1)
+            if self._show_resources and system.surveyed:
+                resources = sum(
+                    amount
+                    for obj in system.objects
+                    if obj.surveyed
+                    for amount in obj.resources.values()
+                )
+                if resources:
+                    marker = (position[0] + 8, position[1] - 8)
+                    pygame.draw.circle(self.screen, (255, 203, 100), marker, 3)
+                    if self._galaxy_zoom >= 0.62:
+                        self._label(
+                            f"R{resources}",
+                            (marker[0] + 4, marker[1] - 6),
+                            self.ui.fonts.get(11),
+                            (255, 203, 100),
+                        )
             label_priority = (
                 0
                 if system.system_id == self._selected_system
@@ -866,6 +1432,28 @@ class GameWindow:
             )
             if label_priority < 4 or self._galaxy_zoom >= 0.82:
                 label_candidates.append((label_priority, system, position))
+
+        if self._show_fleets:
+            for fleet in campaign.fleets:
+                if self._fog_of_war and fleet.system_id not in sensor_system_ids:
+                    continue
+                fleet_position = self._map_position(fleet.system_id)
+                pygame.draw.polygon(
+                    self.screen,
+                    (110, 231, 245),
+                    (
+                        (fleet_position[0], fleet_position[1] - 9),
+                        (fleet_position[0] + 7, fleet_position[1] + 6),
+                        (fleet_position[0] - 7, fleet_position[1] + 6),
+                    ),
+                )
+                if self._galaxy_zoom >= 0.62:
+                    self._label(
+                        fleet.name,
+                        (fleet_position[0] + 10, fleet_position[1] - 6),
+                        self.ui.fonts.get(11),
+                        (110, 231, 245),
+                    )
 
         label_font = self.ui.fonts.get(13)
         occupied_labels: list[pygame.Rect] = []
@@ -913,6 +1501,32 @@ class GameWindow:
             self.ui.fonts.get(14),
             theme.muted,
         )
+        layer_status = " ".join(
+            label
+            for enabled, label in (
+                (self._show_borders, "TERRITORY"),
+                (self._show_fleets, "FLEET"),
+                (self._show_trade_routes, "TRADE"),
+                (self._show_resources, "RES"),
+                (self._show_sensors, "SENSOR"),
+                (self._fog_of_war, "FOG"),
+                (self._show_exploration, "EXPLORE"),
+            )
+            if enabled
+        )
+        if self._selected_system in campaign.map_bookmarks:
+            layer_status = f"{layer_status}  BOOKMARK" if layer_status else "BOOKMARK"
+        ownership_status = (
+            ", ".join(territory_owners) or "NONE"
+            if self._show_borders
+            else "HIDDEN"
+        )
+        self._label(
+            f"OWNERSHIP: {ownership_status}  |  {layer_status}",
+            (bounds.x + 12, bounds.y + 64),
+            self.ui.fonts.get(11),
+            theme.muted,
+        )
         legend_y = bounds.y + 49
         legend_font = self.ui.fonts.get(12)
         legend = (
@@ -928,7 +1542,8 @@ class GameWindow:
             legend_x += legend_step
         self._label(
             (
-                f"{len(campaign.systems)} STARS  /  SEED {campaign.galaxy.seed}  /  "
+                f"{len(visible_systems) if self._fog_of_war else len(campaign.systems)} "
+                f"STARS  /  SEED {campaign.galaxy.seed}  /  "
                 f"{campaign.galaxy.diameter_light_years:,} LY  /  {self._galaxy_zoom:.1f}x"
             ),
             (bounds.x + 12, bounds.y + 28),
@@ -981,7 +1596,8 @@ class GameWindow:
         self._label(
             (
                 f"{system.status.upper()}  |  {system.star_type}  |  "
-                f"{system.mass_solar:.2f} M_sun"
+                f"{system.mass_solar:.2f} M_sun  |  "
+                f"{system.owner.upper() if system.owner else 'UNCLAIMED'}"
             ),
             (text_x, card.y + 27),
             self.ui.fonts.get(14),
@@ -998,7 +1614,10 @@ class GameWindow:
         objective_font = self.ui.fonts.get(13)
         objective = self._wrap_text(
             objective_font,
-            f"OBJECTIVE: {self.application.campaign.objective}",
+            (
+                f"{'BOOKMARKED  |  ' if system.system_id in self.application.campaign.map_bookmarks else ''}"
+                f"OBJECTIVE: {self.application.campaign.objective}"
+            ),
             max_width,
         )
         if objective:
@@ -1246,6 +1865,7 @@ class GameWindow:
         ):
             return False
         self._selected_object = closest.object_id
+        self._planet_view = "DETAILS"
         self._filter_content()
         return True
 
@@ -1320,6 +1940,20 @@ class GameWindow:
         theme = self.ui.theme
         left = self.systems.rect.x + 2
         y = self.systems.rect.y + 4 if compact else self.systems.rect.bottom + 5
+        is_planet = system_object.is_planet or system_object.kind == "Moon"
+        if is_planet and self._planet_view == "MANAGEMENT":
+            self._draw_planet_management(system_object, font, left, y)
+            return
+        if is_planet and self._planet_view == "HISTORY":
+            self._draw_planet_history(system_object, font, left, y, compact)
+            return
+        self._label(
+            "M MANAGEMENT  |  H HISTORY  |  D DETAILS",
+            (left, y),
+            self.ui.fonts.get(12),
+            theme.muted,
+        )
+        y += 18
         status = (
             "COLONIZED"
             if system_object.colonized
@@ -1353,12 +1987,30 @@ class GameWindow:
                 theme.text,
             )
         detail_y = y + 96
-        if system_object.orbit_au is not None:
+        if system_object.orbit_distance_km is not None:
+            physical_data = (
+                f"ORBIT {system_object.orbit_distance_km:,.0f} km from parent"
+            )
+            if system_object.orbit_period_days is not None:
+                physical_data += f"  |  PERIOD {system_object.orbit_period_days:.1f} days"
+            if system_object.parent_id is not None:
+                parent = self.application.campaign.get_object(
+                    self._selected_system,
+                    system_object.parent_id,
+                )
+                physical_data += f"  |  PARENT {parent.name}"
+            self._label(physical_data, (left, detail_y), description_font, theme.warning)
+            detail_y += 17
+        elif system_object.orbit_au is not None:
             physical_data = f"ORBIT {system_object.orbit_au:.2f} AU"
             if system_object.mass_earth is not None:
                 physical_data += f"  |  MASS {system_object.mass_earth:.1f} M_earth"
             if system_object.radius_earth is not None:
                 physical_data += f"  |  RADIUS {system_object.radius_earth:.1f} R_earth"
+            if system_object.gravity_earth is not None:
+                physical_data += f"  |  GRAVITY {system_object.gravity_earth:.2f} g"
+            if system_object.orbit_period_days is not None:
+                physical_data += f"  |  YEAR {system_object.orbit_period_days:.1f} d"
             for index, line in enumerate(
                 self._wrap_text(
                     description_font,
@@ -1367,6 +2019,18 @@ class GameWindow:
                 )[:2]
             ):
                 self._label(line, (left, detail_y), description_font, theme.warning)
+                detail_y += 17
+        if is_planet:
+            environment = (
+                f"CLIMATE {system_object.climate}  |  "
+                f"ATMOSPHERE {system_object.atmosphere}"
+            )
+            for line in self._wrap_text(
+                description_font,
+                environment,
+                self.systems.rect.width - 6,
+            )[:2]:
+                self._label(line, (left, detail_y), description_font, theme.text)
                 detail_y += 17
         if system_object.surveyed and system_object.resources:
             deposits = "DEPOSITS: " + "  ".join(
@@ -1380,6 +2044,117 @@ class GameWindow:
             )[:2]:
                 self._label(line, (left, detail_y), description_font, theme.warning)
                 detail_y += 17
+
+    def _draw_planet_management(
+        self,
+        planet: SystemObject,
+        font: pygame.font.Font,
+        left: int,
+        y: int,
+    ) -> None:
+        assert self.systems is not None
+        campaign = self.application.campaign
+        system = campaign.get_system(self._selected_system)
+        theme = self.ui.theme
+        self._label(
+            f"PLANET MANAGEMENT  |  {planet.name.upper()}",
+            (left, y),
+            font,
+            theme.accent,
+        )
+        self._label(
+            "M MANAGEMENT  |  H HISTORY  |  D DETAILS",
+            (left, y + 20),
+            self.ui.fonts.get(12),
+            theme.muted,
+        )
+        population = planet.population if planet.colonized else "No settlement"
+        capacity = (
+            f"{planet.population_capacity_billions:.1f}B"
+            if planet.population_capacity_billions
+            else "Not suitable for settlement"
+        )
+        data = (
+            f"OWNER: {planet.owner or 'Unclaimed'}",
+            f"POPULATION: {population}  |  CAPACITY: {capacity}",
+            f"HABITABILITY: {'Habitable' if planet.habitable else 'Hostile'}",
+            (
+                f"CLIMATE: {planet.climate}  |  "
+                f"GRAVITY: {planet.gravity_earth:.2f} g"
+                if planet.gravity_earth is not None
+                else f"CLIMATE: {planet.climate}"
+            ),
+            f"ATMOSPHERE: {planet.atmosphere}",
+            f"SURFACE: {planet.surface_conditions}",
+            (
+                "SYSTEM CONTROL: "
+                f"{system.owner or 'Unclaimed'}"
+            ),
+        )
+        for index, line in enumerate(data):
+            self._label(
+                line,
+                (left, y + 44 + index * 19),
+                self.ui.fonts.get(13),
+                theme.text if index != 1 else theme.warning,
+            )
+        if planet.resources:
+            deposits = "RESOURCES: " + ", ".join(
+                f"{name} {amount}" for name, amount in planet.resources.items()
+            )
+            self._label(
+                deposits,
+                (left, y + 44 + len(data) * 19),
+                self.ui.fonts.get(13),
+                theme.warning,
+            )
+
+    def _draw_planet_history(
+        self,
+        planet: SystemObject,
+        font: pygame.font.Font,
+        left: int,
+        y: int,
+        compact: bool,
+    ) -> None:
+        assert self.systems is not None
+        theme = self.ui.theme
+        self._label(
+            f"PLANETARY HISTORY  |  {planet.name.upper()}",
+            (left, y),
+            font,
+            theme.accent,
+        )
+        self._label(
+            "M MANAGEMENT  |  H HISTORY  |  D DETAILS",
+            (left, y + 20),
+            self.ui.fonts.get(12),
+            theme.muted,
+        )
+        entries = list(reversed(planet.history)) or ["No recorded planetary events."]
+        available_height = (
+            self.systems.rect.height
+            if compact
+            else (
+                self.action_button.rect.top - y
+                if self.action_button is not None
+                else self.systems.rect.height
+            )
+        )
+        max_entries = max(1, (available_height - 48) // 35)
+        for index, entry in enumerate(entries[:max_entries]):
+            wrapped = self._wrap_text(
+                self.ui.fonts.get(13),
+                entry,
+                self.systems.rect.width - 8,
+            )
+            for line_index, line in enumerate(wrapped[:2]):
+                self._label(
+                    line,
+                    (left, y + 44 + index * 35 + line_index * 16),
+                    self.ui.fonts.get(13),
+                    theme.text,
+                )
 
     def _draw_chronicle(self, font: pygame.font.Font) -> None:
         assert self.screen is not None

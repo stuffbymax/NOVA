@@ -55,6 +55,19 @@ class SystemObject:
     orbit_au: float | None = None
     mass_earth: float | None = None
     radius_earth: float | None = None
+    climate: str = "Unknown"
+    gravity_earth: float | None = None
+    atmosphere: str = "Unknown"
+    surface_conditions: str = "Unknown"
+    population_capacity_billions: float = 0.0
+    orbit_period_days: float | None = None
+    orbit_distance_km: float | None = None
+    owner: str | None = None
+    history: list[str] = field(default_factory=list)
+
+    @property
+    def is_planet(self) -> bool:
+        return self.kind in ("Planet", "Gas giant")
 
 
 @dataclass
@@ -81,6 +94,7 @@ class StarSystem:
     companion_mass_solar: float = 0.0
     companion_luminosity_solar: float = 0.0
     binary_separation_au: float | None = None
+    owner: str | None = None
 
     @property
     def status(self) -> str:
@@ -97,6 +111,14 @@ class StarSystem:
     @property
     def total_luminosity_solar(self) -> float:
         return self.luminosity_solar + self.companion_luminosity_solar
+
+    @property
+    def planets(self) -> tuple[SystemObject, ...]:
+        return tuple(obj for obj in self.objects if obj.is_planet)
+
+    @property
+    def moons(self) -> tuple[SystemObject, ...]:
+        return tuple(obj for obj in self.objects if obj.kind == "Moon")
 
 
 @dataclass(frozen=True)
@@ -420,10 +442,34 @@ class GalaxyGenerator:
             if any(
                 value is not None and (not math.isfinite(value) or value <= 0)
                 for obj in system.objects
-                for value in (obj.mass_earth, obj.radius_earth)
+                for value in (
+                    obj.mass_earth,
+                    obj.radius_earth,
+                    obj.gravity_earth,
+                    obj.orbit_period_days,
+                    obj.orbit_distance_km,
+                )
             ):
                 raise RuntimeError(
                     f"Galaxy generation produced invalid planetary data in {system.name}"
+                )
+            if any(
+                not math.isfinite(obj.population_capacity_billions)
+                or obj.population_capacity_billions < 0
+                or (obj.owner is not None and not obj.colonized)
+                or (
+                    obj.is_planet
+                    and (
+                        obj.mass_earth is None
+                        or obj.radius_earth is None
+                        or obj.gravity_earth is None
+                        or obj.orbit_period_days is None
+                    )
+                )
+                for obj in system.objects
+            ):
+                raise RuntimeError(
+                    f"Galaxy generation produced inconsistent planet data in {system.name}"
                 )
             if any(
                 amount < 0
@@ -525,6 +571,7 @@ class GalaxyGenerator:
                 colonized=colonized,
                 population=population,
                 z=z,
+                owner="Union" if colonized else None,
             )
             (
                 system.mass_solar,
@@ -725,6 +772,19 @@ class GalaxyGenerator:
                 if world_type == "Gas giant"
                 else mass_earth**0.28
             )
+            climate = self._planet_climate(world_type)
+            gravity_earth = mass_earth / radius_earth**2
+            atmosphere = self._planet_atmosphere(world_type, habitable)
+            surface_conditions = self._planet_surface(world_type)
+            population_capacity = (
+                round(max(2.0, 8.0 * radius_earth**1.5), 1)
+                if habitable
+                else 0.0
+            )
+            orbit_period_days = (
+                365.25
+                * math.sqrt(orbit_au**3 / max(system.total_mass_solar, 0.0001))
+            )
             worlds.append(
                 SystemObject(
                     object_id=object_id,
@@ -750,6 +810,13 @@ class GalaxyGenerator:
                     orbit_au=orbit_au,
                     mass_earth=mass_earth,
                     radius_earth=radius_earth,
+                    climate=climate,
+                    gravity_earth=gravity_earth,
+                    atmosphere=atmosphere,
+                    surface_conditions=surface_conditions,
+                    population_capacity_billions=population_capacity,
+                    orbit_period_days=orbit_period_days,
+                    owner="Union" if system.colonized and index == 0 else None,
                 )
             )
 
@@ -764,6 +831,10 @@ class GalaxyGenerator:
             parent = eligible_hosts[moon_index % len(eligible_hosts)]
             moon_type = self.random.choice(("Icy moon", "Airless moon", "Ocean moon"))
             moon_name = ("I", "II", "III", "IV", "V", "VI")
+            moon_mass = self.random.uniform(0.001, 0.08)
+            moon_radius = moon_mass**0.28
+            orbit_distance = self.random.uniform(120_000, 900_000)
+            parent_mass = parent.mass_earth or 1.0
             moons.append(
                 SystemObject(
                     object_id=f"moon-{moon_index + 1}",
@@ -778,6 +849,18 @@ class GalaxyGenerator:
                         moon_type,
                         system.metallicity_dex,
                     ),
+                    mass_earth=moon_mass,
+                    radius_earth=moon_radius,
+                    gravity_earth=moon_mass / moon_radius**2,
+                    climate=self._planet_climate(moon_type),
+                    atmosphere=self._planet_atmosphere(moon_type, False),
+                    surface_conditions=self._planet_surface(moon_type),
+                    orbit_period_days=(
+                        27.3
+                        * (orbit_distance / 384_400) ** 1.5
+                        / math.sqrt(parent_mass)
+                    ),
+                    orbit_distance_km=orbit_distance,
                 )
             )
 
@@ -989,6 +1072,69 @@ class GalaxyGenerator:
         if orbit_au < 0.15:
             return self.random.uniform(0.05, 1.5)
         return self.random.lognormvariate(math.log(1.2), 0.8)
+
+    @staticmethod
+    def _planet_climate(world_type: str) -> str:
+        world = world_type.casefold()
+        if "gas giant" in world:
+            return "Deep atmosphere"
+        if "ocean" in world:
+            return "Oceanic"
+        if "jungle" in world:
+            return "Tropical"
+        if "temperate" in world:
+            return "Temperate"
+        if "desert" in world or "arid" in world:
+            return "Arid"
+        if "arctic" in world or "icy" in world or "frozen" in world:
+            return "Polar"
+        if "volcanic" in world or "scorched" in world:
+            return "Volcanic"
+        if "toxic" in world:
+            return "Toxic"
+        if "airless" in world or "barren" in world:
+            return "Airless"
+        return "Mixed"
+
+    @staticmethod
+    def _planet_atmosphere(world_type: str, habitable: bool) -> str:
+        world = world_type.casefold()
+        if "gas giant" in world:
+            return "Hydrogen-helium"
+        if habitable:
+            return "Breathable nitrogen-oxygen"
+        if "toxic" in world:
+            return "Toxic, sulfur-rich"
+        if "ocean" in world or "ice" in world or "frozen" in world:
+            return "Dense carbon dioxide"
+        if "airless" in world or "barren" in world or "scorched" in world:
+            return "No substantial atmosphere"
+        return "Thin carbon dioxide"
+
+    @staticmethod
+    def _planet_surface(world_type: str) -> str:
+        world = world_type.casefold()
+        if "gas giant" in world:
+            return "No solid surface; turbulent cloud bands"
+        if "ocean" in world:
+            return "Global liquid-water ocean"
+        if "jungle" in world:
+            return "Dense vegetation and humid lowlands"
+        if "temperate" in world:
+            return "Stable continents and liquid-water basins"
+        if "desert" in world or "arid" in world:
+            return "Dry rocky terrain and shifting dunes"
+        if "arctic" in world or "icy" in world or "frozen" in world:
+            return "Water-ice crust and frozen plains"
+        if "volcanic" in world:
+            return "Active volcanism and molten regions"
+        if "scorched" in world:
+            return "Baked rock and exposed impact basins"
+        if "toxic" in world:
+            return "Corrosive deposits and unstable terrain"
+        if "airless" in world or "barren" in world:
+            return "Airless rock and impact craters"
+        return "Rocky terrain with varied surface features"
 
     def _add_wormholes(self, systems: list[StarSystem]) -> None:
         if len(systems) < 20:

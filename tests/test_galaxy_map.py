@@ -65,5 +65,174 @@ def test_clicking_a_star_opens_its_system(game_window: GameWindow) -> None:
 
     assert window._select_map_item(position)
     assert window._selected_system == "asterion"
+    window.application.campaign.get_object(
+        window._selected_system,
+        window._selected_object,
+    )
     assert window.tabs is not None
     assert window.tabs.active == "SYSTEM"
+
+
+def test_galaxy_map_layers_render_and_fog_hides_unexplored_systems(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    campaign = window.application.campaign
+    window._show_borders = True
+    window._show_fleets = True
+    window._show_trade_routes = True
+    window._show_resources = True
+    window._show_sensors = True
+    window._show_exploration = True
+
+    trade_edges = window._trade_route_edges()
+    assert trade_edges
+    assert len(trade_edges) > 1
+    assert trade_edges.issubset(
+        {tuple(sorted(route)) for route in campaign.routes}
+    )
+    window._draw_galaxy_map()
+
+    window._fog_of_war = True
+    hidden = next(
+        system
+        for system in campaign.systems
+        if not window._is_system_visible(system)
+    )
+    assert not window._select_map_item(window._map_position(hidden.system_id))
+    assert campaign.fleets[0].system_id == "sol"
+
+
+def test_territory_layer_draws_regions_for_owned_systems(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    bounds = window._map_rect()
+    polygons, borders = window._territory_geometry(bounds)
+
+    assert polygons
+    assert all(owner == "Union" for owner, _ in polygons)
+    assert borders
+    assert window._owner_route_edges()["Union"]
+    window._draw_territory_layer(bounds, window.application.campaign.systems)
+
+    window.application.campaign.get_system("new-carthage").owner = "Sovereign Reach"
+    polygons, _ = window._territory_geometry(bounds)
+    assert {owner for owner, _ in polygons} == {"Union", "Sovereign Reach"}
+    window._draw_territory_layer(bounds, window.application.campaign.systems)
+
+
+def test_territory_layer_can_be_toggled_with_p(game_window: GameWindow) -> None:
+    window = game_window
+    assert window._show_borders
+    pygame.event.clear()
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_p, mod=0))
+
+    window._handle_events()
+
+    assert not window._show_borders
+
+
+def test_fog_toggle_hides_unknown_selection_and_filters_system_list(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    campaign = window.application.campaign
+    hidden = next(
+        system
+        for system in campaign.systems
+        if not system.surveyed and system.system_id not in window._sensor_system_ids()
+    )
+    window._selected_system = hidden.system_id
+    pygame.event.clear()
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_f, mod=0))
+
+    window._handle_events()
+
+    assert window._fog_of_war
+    assert window._is_system_visible(
+        campaign.get_system(window._selected_system)
+    )
+    campaign.get_object(window._selected_system, window._selected_object)
+    assert window.systems is not None
+    assert all(
+        window._is_system_visible(
+            next(system for system in campaign.systems if system.name == row[0])
+        )
+        for row in window.systems.rows
+    )
+
+
+def test_map_search_filters_and_centers_a_system(game_window: GameWindow) -> None:
+    window = game_window
+    assert window.search is not None
+    assert window.dropdown is not None
+    window.search.text = "Asterion"
+
+    assert window._map_filter_matches(window.application.campaign.get_system("asterion"))
+    assert not window._map_filter_matches(window.application.campaign.get_system("sol"))
+    assert window._search_map()
+    assert window._selected_system == "asterion"
+    window.application.campaign.get_object(
+        window._selected_system,
+        window._selected_object,
+    )
+
+    window.search.text = ""
+    window.dropdown.selected = "Colonized"
+    assert window._map_filter_matches(window.application.campaign.get_system("sol"))
+    assert not window._map_filter_matches(window.application.campaign.get_system("asterion"))
+
+
+def test_map_bookmarks_can_be_added_removed_and_visited(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    campaign = window.application.campaign
+    window._selected_system = "asterion"
+
+    window._toggle_map_bookmark()
+    assert campaign.map_bookmarks == ["asterion"]
+
+    window._selected_system = "sol"
+    window._jump_to_next_bookmark()
+    assert window._selected_system == "asterion"
+    campaign.get_object(window._selected_system, window._selected_object)
+
+    window._toggle_map_bookmark()
+    assert campaign.map_bookmarks == []
+
+
+def test_planet_management_and_history_views_render(game_window: GameWindow) -> None:
+    window = game_window
+    assert window.screen is not None
+    assert window.systems is not None
+    window.tabs.active = "SYSTEM"
+    window._selected_system = "sol"
+    window._selected_object = "earth"
+
+    window._planet_view = "MANAGEMENT"
+    window._draw_object_details(window.ui.fonts.get(18), compact=False)
+
+    window._planet_view = "HISTORY"
+    window._draw_object_details(window.ui.fonts.get(18), compact=False)
+
+    window._planet_view = "DETAILS"
+    window._draw_object_details(window.ui.fonts.get(18), compact=False)
+
+
+def test_planet_management_and_history_keyboard_controls(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    assert window.tabs is not None
+    window.tabs.active = "SYSTEM"
+    for key, expected in (
+        (pygame.K_m, "MANAGEMENT"),
+        (pygame.K_h, "HISTORY"),
+        (pygame.K_d, "DETAILS"),
+    ):
+        pygame.event.clear()
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key, mod=0))
+        window._handle_events()
+        assert window._planet_view == expected

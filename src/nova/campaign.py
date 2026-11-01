@@ -1,5 +1,7 @@
 """Playable campaign rules for the first NOVA exploration scenario."""
 
+from dataclasses import dataclass
+
 from .galaxy import (
     Galaxy,
     GalaxyGenerator,
@@ -7,6 +9,13 @@ from .galaxy import (
     StarSystem,
     SystemObject,
 )
+
+
+@dataclass(frozen=True)
+class Fleet:
+    fleet_id: str
+    name: str
+    system_id: str
 
 
 class Campaign:
@@ -34,6 +43,8 @@ class Campaign:
         ).generate()
         self.systems = self.galaxy.systems
         self.routes = self.galaxy.routes
+        self.fleets = [Fleet("frontier-survey-group", "Frontier Survey Group", "sol")]
+        self.map_bookmarks: list[str] = []
         self.alloys = 50.0
         self.science = 18.0
         self.influence = 8.0
@@ -44,6 +55,12 @@ class Campaign:
             "2480.01  The frontier is open. Survey the unknown systems.",
             "2480.01  Union scouts report an ancient signal at Eidolon.",
         ]
+        for system in self.systems:
+            for planet in system.planets:
+                if planet.colonized:
+                    planet.history.append(
+                        f"{self.date_label}  Colony established under Union administration."
+                    )
 
     @property
     def colonies(self) -> int:
@@ -135,6 +152,11 @@ class Campaign:
             self.science -= self.SURVEY_SCIENCE_COST
             system_object.surveyed = True
             system.surveyed = True
+            if system_object.is_planet or system_object.kind == "Moon":
+                self._record_planet_history(
+                    system_object,
+                    "Survey completed; planetary observations added to the archive.",
+                )
             if system_object.anomaly:
                 system_object.world_type = "Anomaly detected"
                 message = f"Anomaly detected at {system_object.name} in {system.name}. A special project is ready."
@@ -205,9 +227,16 @@ class Campaign:
         self.alloys -= self.COLONY_ALLOY_COST
         self.influence -= self.COLONY_INFLUENCE_COST
         target.colonized = True
+        target.owner = "Union"
         target.population = "1.2B"
         system.colonized = True
+        system.owner = "Union"
         system.population = target.population
+        self._record_planet_history(
+            target,
+            "Colony founded; Union administration established.",
+        )
+        system.owner = "Union"
         message = (
             f"Colony founded: {system.name}. "
             "The new settlement will expand the Union's reach."
@@ -246,6 +275,13 @@ class Campaign:
     def _record(self, message: str) -> None:
         self.log.append(f"{self.date_label}  {message}")
         self.log = self.log[-30:]
+
+    def _record_planet_history(
+        self,
+        planet: SystemObject,
+        event: str,
+    ) -> None:
+        planet.history.append(f"{self.date_label}  {event}")
 
     def _recover_deposits(self, system_object: SystemObject) -> str:
         deposits = system_object.resources

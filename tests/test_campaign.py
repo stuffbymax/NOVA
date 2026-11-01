@@ -25,6 +25,7 @@ def test_colony_requires_survey_and_spends_resources() -> None:
     assert campaign.get_system("asterion").population == "1.2B"
     assert campaign.alloys == 33
     assert campaign.influence == 5
+    assert campaign.get_system("asterion").owner == "Union"
 
 
 def test_gateway_and_two_frontier_colonies_complete_objective() -> None:
@@ -39,6 +40,15 @@ def test_gateway_and_two_frontier_colonies_complete_objective() -> None:
     assert campaign.gateway_studied
     assert campaign.objective_complete
     assert "Frontier secured" in campaign.objective
+
+
+def test_union_owns_initial_colonies_and_starts_with_a_survey_fleet() -> None:
+    campaign = Campaign()
+
+    assert campaign.get_system("sol").owner == "Union"
+    assert campaign.get_system("new-carthage").owner == "Union"
+    assert len(campaign.fleets) == 1
+    assert campaign.fleets[0].system_id == "sol"
 
 
 def test_campaign_rejects_actions_without_resources() -> None:
@@ -123,6 +133,69 @@ def test_habitable_object_can_be_colonized_independently() -> None:
     assert "Colony founded" in message
     assert target.colonized
     assert campaign.get_system("asterion").colonized
+    assert target.owner == "Union"
+    assert campaign.get_system("asterion").owner == "Union"
+    assert any("Colony founded" in event for event in target.history)
+
+
+def test_planetary_data_includes_environment_gravity_and_population_capacity() -> None:
+    campaign = Campaign(seed=941, size="large")
+
+    for system in campaign.systems:
+        planets = system.planets
+        assert planets
+        assert all(
+            planet.mass_earth is not None
+            and planet.radius_earth is not None
+            and planet.gravity_earth == pytest.approx(
+                planet.mass_earth / planet.radius_earth**2
+            )
+            for planet in planets
+        )
+        assert all(
+            planet.climate != "Unknown"
+            and planet.atmosphere != "Unknown"
+            and planet.surface_conditions != "Unknown"
+            and planet.orbit_period_days is not None
+            for planet in planets
+        )
+        assert all(
+            planet.population_capacity_billions > 0
+            for planet in planets
+            if planet.habitable
+        )
+        assert all(
+            planet.population_capacity_billions == 0
+            for planet in planets
+            if not planet.habitable
+        )
+
+        for moon in system.moons:
+            assert moon.parent_id in {planet.object_id for planet in planets}
+            assert moon.orbit_distance_km is not None
+            assert moon.orbit_period_days is not None
+            assert moon.gravity_earth is not None
+
+
+def test_initial_planet_ownership_and_history_match_colony_state() -> None:
+    campaign = Campaign()
+    earth = campaign.get_object("sol", "earth")
+    uncolonized = campaign.get_object("asterion", "frontier")
+
+    assert earth.owner == "Union"
+    assert earth.history
+    assert uncolonized.owner is None
+    assert uncolonized.history == []
+
+
+def test_planet_survey_is_recorded_in_planetary_history() -> None:
+    campaign = Campaign()
+
+    campaign.perform_object_action("asterion", "frontier")
+
+    frontier = campaign.get_object("asterion", "frontier")
+    assert frontier.surveyed
+    assert any("Survey completed" in event for event in frontier.history)
 
 
 def test_galaxy_generation_is_reproducible_from_seed() -> None:
