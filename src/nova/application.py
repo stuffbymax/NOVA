@@ -34,13 +34,18 @@ class Application:
     def quick_save_path(self) -> Path:
         return self.config.save_path / "quick-save.json"
 
-    def new_game(self, player_species_id: str = "union-human") -> None:
+    def new_game(
+        self,
+        player_species_id: str = "union-human",
+        name_culture: str = "all",
+    ) -> None:
         self.campaign = Campaign(
             seed=self.config.galaxy_seed,
             size=self.config.galaxy_size,
             shape=self.config.galaxy_shape,
             galaxy_name=self.config.galaxy_name,
             player_species_id=player_species_id,
+            name_culture=name_culture,
             content_path=self.config.content_path,
         )
 

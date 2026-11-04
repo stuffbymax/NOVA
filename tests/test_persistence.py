@@ -38,6 +38,29 @@ def test_save_round_trip_preserves_campaign_state(tmp_path: Path) -> None:
     assert loaded.map_bookmarks == ["asterion"]
 
 
+def test_save_round_trip_preserves_derived_species_and_rights(
+    tmp_path: Path,
+) -> None:
+    campaign = Campaign()
+    colony = campaign.player_colonies[0]
+    campaign.researched_technologies.add("xeno-biology")
+    campaign.engineer_species(
+        colony.system_id,
+        colony.planet_id,
+        "enhanced-growth",
+    )
+    derived_species_id = colony.species_id
+    campaign.set_species_rights(derived_species_id, "resident")
+    target = tmp_path / "species-save.json"
+
+    save_campaign(target, campaign)
+    loaded = load_campaign(target)
+
+    assert loaded.species_catalog[derived_species_id].derived_from == "union-human"
+    assert loaded.species_rights[derived_species_id] == "resident"
+    assert loaded.player_colonies[0].species_id == derived_species_id
+
+
 def test_save_integrity_check_rejects_modified_payload(tmp_path: Path) -> None:
     target = tmp_path / "slot-1.json"
     save_campaign(target, Campaign())

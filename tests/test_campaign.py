@@ -84,6 +84,168 @@ def test_species_choice_drives_colonist_biology() -> None:
     assert campaign.species_catalog[colony.species_id].lifespan_years == 240
 
 
+def test_name_culture_is_normalized_and_used_for_leader_generation() -> None:
+    campaign = Campaign(name_culture=" Humanoid\\Human\\Uralic\\Hungarian ")
+    human = campaign.species_catalog["union-human"]
+
+    assert campaign.name_culture == "humanoid/human/uralic/hungarian"
+    assert campaign.leader_name == human.generate_name(
+        campaign.galaxy.seed,
+        campaign.name_culture,
+    )
+
+
+def test_genetic_engineering_requires_research_and_creates_derived_species() -> None:
+    campaign = Campaign()
+    colony = campaign.player_colonies[0]
+    parent = campaign.species_catalog[colony.species_id]
+    science = campaign.science
+    influence = campaign.influence
+
+    with pytest.raises(ValueError, match="Research Xenobiology"):
+        campaign.engineer_species(
+            colony.system_id,
+            colony.planet_id,
+            "enhanced-growth",
+        )
+    assert campaign.science == science
+    assert campaign.influence == influence
+
+    campaign.researched_technologies.add("xeno-biology")
+    campaign.engineer_species(
+        colony.system_id,
+        colony.planet_id,
+        "enhanced-growth",
+    )
+    engineered = campaign.species_catalog[colony.species_id]
+
+    assert engineered.derived_from == parent.species_id
+    assert engineered.annual_growth_rate == pytest.approx(
+        parent.annual_growth_rate + 0.005
+    )
+    assert campaign.science == science - 15
+    assert campaign.influence == influence - 3
+
+
+def test_natural_adaptation_tracks_progress_and_creates_a_derived_species() -> None:
+    campaign = Campaign()
+    colony = campaign.player_colonies[0]
+    planet = campaign.get_object(colony.system_id, colony.planet_id)
+    planet.climate = "Polar"
+
+    campaign.advance(365 * 5)
+    assert colony.evolution_progress == pytest.approx(0.5)
+    assert colony.species_id == "union-human"
+    campaign.advance(365 * 5)
+
+    adapted = campaign.species_catalog[colony.species_id]
+    assert adapted.derived_from == "union-human"
+    assert "Polar" in adapted.preferred_climates
+    assert "Natural Polar adaptation" in adapted.traits
+    assert colony.evolution_progress == pytest.approx(0)
+    assert any("Species evolution" in event for event in campaign.log)
+
+
+def test_species_rights_affect_population_growth() -> None:
+    citizen_campaign = Campaign()
+    restricted_campaign = Campaign()
+    restricted_campaign.set_species_rights("union-human", "restricted")
+    citizen_colony = citizen_campaign.player_colonies[0]
+    restricted_colony = restricted_campaign.player_colonies[0]
+
+    citizen_campaign.advance(365)
+    restricted_campaign.advance(365)
+
+    assert citizen_colony.population_billions > restricted_colony.population_billions
+    assert citizen_colony.happiness > restricted_colony.happiness
+
+
+def test_population_migration_moves_a_limited_share_between_colonies() -> None:
+    campaign = Campaign()
+    campaign.perform_action("asterion")
+    campaign.perform_action("asterion")
+    source, target = campaign.player_colonies[:2]
+    source_before = source.population_billions
+    target_before = target.population_billions
+    total_before = source.population_billions + target.population_billions
+
+    message = campaign.migrate_population(
+        source.system_id,
+        source.planet_id,
+        target.system_id,
+        target.planet_id,
+    )
+
+    assert "Migration complete" in message
+    assert 0 < source_before - source.population_billions <= 0.1
+    assert target.population_billions > target_before
+    assert source.population_billions + target.population_billions == pytest.approx(
+        total_before
+    )
+
+    campaign.set_species_rights(source.species_id, "restricted")
+    with pytest.raises(ValueError, match="Restricted species cannot migrate"):
+        campaign.migrate_population(
+            source.system_id,
+            source.planet_id,
+            target.system_id,
+            target.planet_id,
+        )
+
+
+def test_population_migration_rejects_same_or_full_destination() -> None:
+    campaign = Campaign()
+    campaign.perform_action("asterion")
+    campaign.perform_action("asterion")
+    source, target = campaign.player_colonies[:2]
+    influence = campaign.influence
+
+    with pytest.raises(ValueError, match="different destination"):
+        campaign.migrate_population(
+            source.system_id,
+            source.planet_id,
+            source.system_id,
+            source.planet_id,
+        )
+
+    target_planet = campaign.get_object(target.system_id, target.planet_id)
+    target_planet.population_capacity_billions = target.population_billions
+    with pytest.raises(ValueError, match="No population can be moved"):
+        campaign.migrate_population(
+            source.system_id,
+            source.planet_id,
+            target.system_id,
+            target.planet_id,
+        )
+    assert campaign.influence == influence
+
+    target.species_id = "auralith"
+    with pytest.raises(ValueError, match="same species"):
+        campaign.migrate_population(
+            source.system_id,
+            source.planet_id,
+            target.system_id,
+            target.planet_id,
+        )
+
+
+def test_synthetic_conversion_creates_a_machine_species() -> None:
+    campaign = Campaign()
+    colony = campaign.player_colonies[0]
+    campaign.researched_technologies.add("xeno-biology")
+    campaign.science = 30
+    campaign.influence = 5
+
+    message = campaign.synthesize_species(colony.system_id, colony.planet_id)
+    synthetic = campaign.species_catalog[colony.species_id]
+
+    assert "Synthetic ascension complete" in message
+    assert synthetic.synthetic
+    assert synthetic.derived_from == "union-human"
+    assert synthetic.lifespan_years == 5000
+    assert campaign.species_rights[synthetic.species_id] == "citizen"
+
+
 def test_population_growth_uses_species_rate_and_planet_capacity() -> None:
     campaign = Campaign()
     colony = campaign.player_colonies[0]

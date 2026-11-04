@@ -1,7 +1,7 @@
 import pygame
 import pytest
 
-from nova.ui import Button, TableWidget, UIManager, UIWindow, WindowManager
+from nova.ui import Button, TableWidget, TabBar, Theme, UIManager, UIWindow, WindowManager
 
 
 def test_table_sorts_columns_and_selects_rows() -> None:
@@ -105,6 +105,24 @@ def test_keyboard_focus_activates_button() -> None:
     )
 
     assert activated == [True]
+
+
+def test_tab_bar_highlights_active_and_hovered_destinations() -> None:
+    pygame.font.init()
+    surface = pygame.Surface((300, 42))
+    theme = Theme()
+    tabs = TabBar(pygame.Rect(0, 0, 300, 40), ["GALAXY", "SYSTEM", "EMPIRE"])
+
+    tabs.draw(surface, pygame.font.Font(None, 16), theme)
+    assert surface.get_at((50, 38))[:3] == theme.accent
+
+    tabs.handle(
+        pygame.event.Event(
+            pygame.MOUSEMOTION,
+            {"pos": (150, 20)},
+        )
+    )
+    assert tabs.hovered_index == 1
 
 
 def test_modal_dialog_blocks_input_until_an_action_is_chosen() -> None:

@@ -59,6 +59,21 @@ def test_galaxy_pan_is_clamped_and_map_draws(game_window: GameWindow) -> None:
     window._draw_map_card()
 
 
+def test_command_hud_draws_resource_readouts(game_window: GameWindow) -> None:
+    window = game_window
+    assert window.screen is not None
+    window.screen.fill((0, 0, 0))
+
+    window._draw_command_hud(
+        window.screen.get_width(),
+        window.application.campaign,
+        paused=False,
+    )
+
+    assert window.screen.get_at((122, 19))[:3] == (221, 165, 92)
+    assert window.screen.get_at((0, 53))[:3] == (41, 79, 98)
+
+
 def test_clicking_a_star_selects_it_without_leaving_galaxy_map(
     game_window: GameWindow,
 ) -> None:
@@ -252,6 +267,29 @@ def test_planet_management_and_history_views_render(game_window: GameWindow) -> 
     window._draw_object_details(window.ui.fonts.get(18), compact=False)
 
 
+def test_selecting_a_surveyed_planet_shows_its_illustrated_dossier(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    assert window.screen is not None
+    assert window.systems is not None
+    assert window.tabs is not None
+    window.tabs.active = "SYSTEM"
+    window._filter_content()
+    planet = window.application.campaign.get_object("sol", "earth")
+    planet.surveyed = True
+    window._selected_system = "sol"
+
+    assert window._select_map_item(window._system_object_position("earth"))
+    assert window._selected_object == "earth"
+
+    window.screen.fill((0, 0, 0))
+    window._draw_object_details(window.ui.fonts.get(18), compact=False)
+    detail_y = window.systems.rect.bottom + 5
+    image_center = (window.systems.rect.x + 2 + 32, detail_y + 22 + 32)
+    assert window.screen.get_at(image_center)[:3] != (0, 0, 0)
+
+
 def test_empire_screen_builds_and_renders_species_art(game_window: GameWindow) -> None:
     window = game_window
     assert window.tabs is not None
@@ -270,6 +308,67 @@ def test_empire_screen_builds_and_renders_species_art(game_window: GameWindow) -
     assert window.move_fleet_button is not None
 
 
+def test_species_screen_lists_colonies_and_applies_player_actions(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    campaign = window.application.campaign
+    assert window.tabs is not None
+    assert window.dropdown is not None
+    window.tabs.active = "SPECIES"
+    window._filter_content()
+
+    assert window.systems is not None
+    assert window.systems.rows
+    assert window.systems.columns == ["COLONY", "SPECIES", "POPULATION"]
+    assert window.dropdown.options[0] == "Citizen rights"
+    window.dropdown.selected = "Restricted rights"
+    window._perform_selected_action()
+    assert campaign.species_rights["union-human"] == "restricted"
+
+    campaign.researched_technologies.add("xeno-biology")
+    campaign.science = 100
+    campaign.influence = 20
+    window.dropdown.selected = "Enhanced growth"
+    window._perform_selected_action()
+    assert campaign.player_colonies[0].species_id.startswith("union-human-enhanced-growth")
+
+    window.dropdown.selected = "Synthetic conversion"
+    window._perform_selected_action()
+    assert campaign.species_catalog[
+        campaign.player_colonies[0].species_id
+    ].synthetic
+
+    window._draw_species(window.ui.fonts.get(18), compact=window.screen.get_height() < 560)
+
+
+def test_species_screen_migrates_population_to_selected_destination(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    campaign = window.application.campaign
+    campaign.perform_action("asterion")
+    campaign.perform_action("asterion")
+    assert window.tabs is not None
+    assert window.dropdown is not None
+    assert window._species_destination is not None
+    window.tabs.active = "SPECIES"
+    window._filter_content()
+    source = window._selected_species_colony()
+    assert source is not None
+    destination = next(
+        colony
+        for colony in campaign.player_colonies
+        if colony is not source and colony.species_id == source.species_id
+    )
+    window._species_destination.selected = window._species_colony_label(destination)
+    window.dropdown.selected = "Migrate population"
+
+    window._perform_selected_action()
+
+    assert any("Migration complete" in event for event in campaign.log)
+
+
 def test_main_menu_renders_portraits_and_starts_selected_species(
     game_window: GameWindow,
 ) -> None:
@@ -279,10 +378,10 @@ def test_main_menu_renders_portraits_and_starts_selected_species(
         resume=lambda: None,
     )
     window.application.engine = SimpleNamespace(clock=clock)
-    window.application.new_game = lambda species_id: setattr(
+    window.application.new_game = lambda species_id, name_culture="all": setattr(
         window.application,
         "campaign",
-        Campaign(player_species_id=species_id),
+        Campaign(player_species_id=species_id, name_culture=name_culture),
     )
 
     window._show_main_menu()
@@ -292,6 +391,39 @@ def test_main_menu_renders_portraits_and_starts_selected_species(
 
     assert not window._menu_active
     assert window.application.campaign.player_species_id == "auralith"
+    assert window.application.campaign.name_culture == "all"
+
+
+def test_new_game_menu_applies_selected_hierarchical_name_culture(
+    game_window: GameWindow,
+) -> None:
+    window = game_window
+    window.application.engine = SimpleNamespace(
+        clock=SimpleNamespace(pause=lambda: None, resume=lambda: None)
+    )
+    window.application.new_game = lambda species_id, name_culture="all": setattr(
+        window.application,
+        "campaign",
+        Campaign(player_species_id=species_id, name_culture=name_culture),
+    )
+    window._show_main_menu()
+    window._selected_species_id = "union-human"
+    event = pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN,
+        button=1,
+        pos=window._name_culture_rect.center,
+    )
+    for _ in range(len(window.application.campaign.species_catalog["union-human"].name_cultures)):
+        if window._selected_name_culture == "humanoid/human/uralic/hungarian":
+            break
+        window._handle_menu_event(event)
+
+    window._start_new_game()
+
+    assert (
+        window.application.campaign.name_culture
+        == "humanoid/human/uralic/hungarian"
+    )
 
 
 def test_diplomacy_screen_explains_first_contact_and_offers_actions(

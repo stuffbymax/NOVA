@@ -1,7 +1,7 @@
 """Playable campaign rules for the NOVA frontier scenario."""
 
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import logging
 import math
 from pathlib import Path
@@ -15,7 +15,7 @@ from .galaxy import (
     SystemObject,
 )
 from .economy import GameContent, load_game_content
-from .species import load_species_catalog
+from .species import SpeciesProfile, load_species_catalog
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ class ColonyState:
     buildings: list[str] = field(default_factory=list)
     construction: str | None = None
     construction_days_remaining: float = 0.0
+    evolution_progress: float = 0.0
 
 
 @dataclass
@@ -84,6 +85,7 @@ class Campaign:
         shape: str = "spiral",
         galaxy_name: str | None = None,
         player_species_id: str = "union-human",
+        name_culture: str = "all",
         content_path: Path | None = None,
     ) -> None:
         self.content_path = content_path or Path(__file__).resolve().parents[2] / "content"
@@ -96,6 +98,10 @@ class Campaign:
         if player_species_id not in self.species_catalog:
             raise ValueError(f"Unknown player species: {player_species_id}")
         self.player_species_id = player_species_id
+        player_species = self.species_catalog[player_species_id]
+        player_species.generate_name(seed, name_culture)
+        self.name_culture = name_culture.casefold().strip().replace("\\", "/").strip("/")
+        self.leader_name = player_species.generate_name(seed, self.name_culture)
         self.galaxy: Galaxy = GalaxyGenerator(
             GalaxySettings(
                 seed=seed,
@@ -124,6 +130,10 @@ class Campaign:
         self.ai_empires = [
             AIEmpire("veyra", "Veyran Compact", "veyra", ["morrow"])
         ]
+        self.species_rights = {
+            species_id: "citizen" if species_id == player_species_id else "resident"
+            for species_id in self.species_catalog
+        }
         self.ai_fleets = [
             Fleet(
                 "veyra-defense",
@@ -419,6 +429,196 @@ class Campaign:
         self.research_progress = 0.0
         self._record(f"Research begun: {definition.name}.")
         return f"Research begun: {definition.name}."
+
+    def set_species_rights(self, species_id: str, rights: str) -> str:
+        if species_id not in self.species_catalog:
+            raise ValueError(f"Unknown species: {species_id}")
+        if rights not in {"citizen", "resident", "restricted"}:
+            raise ValueError(f"Unknown species rights: {rights}")
+        self.species_rights[species_id] = rights
+        message = f"Species rights changed: {self.species_catalog[species_id].name} now has {rights} status."
+        self._record(message)
+        return message
+
+    def migrate_population(
+        self,
+        source_system_id: str,
+        source_planet_id: str,
+        target_system_id: str,
+        target_planet_id: str,
+    ) -> str:
+        source = self.get_colony(source_system_id, source_planet_id)
+        target = self.get_colony(target_system_id, target_planet_id)
+        source_system = self.get_system(source_system_id)
+        target_system = self.get_system(target_system_id)
+        if source_system.owner != "Union" or target_system.owner != "Union":
+            raise ValueError("Migration is limited to Union colonies")
+        if source is target:
+            raise ValueError("Choose a different destination colony")
+        if source.species_id != target.species_id:
+            raise ValueError("Migration requires the same species at both colonies")
+        if self.species_rights.get(source.species_id) == "restricted":
+            raise ValueError("Restricted species cannot migrate")
+        if self.influence < 1:
+            raise ValueError("Not enough influence to organize migration")
+        target_planet = self.get_object(target_system_id, target_planet_id)
+        capacity = max(
+            0.0,
+            target_planet.population_capacity_billions
+            - target.population_billions,
+        )
+        population = min(source.population_billions * 0.1, 0.1, capacity)
+        if population <= 0:
+            raise ValueError("No population can be moved to that colony")
+        self.influence -= 1
+        source.population_billions -= population
+        target.population_billions += population
+        self._refresh_population_labels()
+        message = (
+            f"Migration complete: {self._format_population(population)} moved "
+            f"from {source_system.name} to {target_system.name}."
+        )
+        self._record(message)
+        return message
+
+    def engineer_species(
+        self,
+        system_id: str,
+        planet_id: str,
+        modification: str,
+    ) -> str:
+        colony = self.get_colony(system_id, planet_id)
+        if self.get_system(system_id).owner != "Union":
+            raise ValueError("Genetic engineering is limited to Union colonies")
+        if "xeno-biology" not in self.researched_technologies:
+            raise ValueError("Research Xenobiology before genetic engineering")
+        parent = self.species_catalog[colony.species_id]
+        planet = self.get_object(system_id, planet_id)
+        if modification == "climate-adaptation":
+            if planet.climate in parent.preferred_climates:
+                raise ValueError("This species is already adapted to the local climate")
+            changes = {
+                "preferred_climates": (*parent.preferred_climates, planet.climate),
+                "traits": (*parent.traits, f"Adapted to {planet.climate}"),
+            }
+        elif modification == "enhanced-growth":
+            if parent.annual_growth_rate >= 0.05:
+                raise ValueError("This species is already at its growth limit")
+            changes = {
+                "annual_growth_rate": min(0.05, parent.annual_growth_rate + 0.005),
+                "traits": (*parent.traits, "Enhanced reproduction"),
+            }
+        elif modification == "extended-lifespan":
+            changes = {
+                "lifespan_years": parent.lifespan_years + 25,
+                "traits": (*parent.traits, "Extended lifespan"),
+            }
+        else:
+            raise ValueError(f"Unknown genetic modification: {modification}")
+        if self.science < 15 or self.influence < 3:
+            raise ValueError("Genetic engineering requires 15 science and 3 influence")
+        self.science -= 15
+        self.influence -= 3
+        engineered = self._derive_species(
+            parent,
+            modification,
+            changes,
+        )
+        colony.species_id = engineered.species_id
+        colony.evolution_progress = 0.0
+        self.species_rights[engineered.species_id] = self.species_rights.get(
+            parent.species_id,
+            "citizen",
+        )
+        message = f"Genetic engineering complete: {engineered.name} established on {planet.name}."
+        self._record(message)
+        return message
+
+    def synthesize_species(self, system_id: str, planet_id: str) -> str:
+        colony = self.get_colony(system_id, planet_id)
+        if self.get_system(system_id).owner != "Union":
+            raise ValueError("Synthetic conversion is limited to Union colonies")
+        if "xeno-biology" not in self.researched_technologies:
+            raise ValueError("Research Xenobiology before synthetic conversion")
+        if self.species_catalog[colony.species_id].synthetic:
+            raise ValueError("This colony is already synthetic")
+        if self.science < 30 or self.influence < 5:
+            raise ValueError("Synthetic conversion requires 30 science and 5 influence")
+        self.science -= 30
+        self.influence -= 5
+        parent = self.species_catalog[colony.species_id]
+        synthetic = self._derive_species(
+            parent,
+            "synthetic",
+            {
+                "name": f"{parent.name} Synthetic",
+                "classification": (*parent.classification, "Synthetic"),
+                "lifespan_years": 5000,
+                "annual_growth_rate": 0.004,
+                "preferred_climates": (
+                    "Temperate",
+                    "Oceanic",
+                    "Tropical",
+                    "Arid",
+                    "Polar",
+                    "Volcanic",
+                    "Toxic",
+                    "Airless",
+                    "Mixed",
+                    "Deep atmosphere",
+                ),
+                "needs": ("Energy", "Minerals", "Maintenance"),
+                "traits": ("Synthetic", "Modular chassis"),
+                "portrait": "species/synthetic.svg",
+                "synthetic": True,
+            },
+        )
+        colony.species_id = synthetic.species_id
+        colony.evolution_progress = 0.0
+        self.species_rights[synthetic.species_id] = "citizen"
+        message = f"Synthetic ascension complete: {synthetic.name} now inhabits {self.get_object(system_id, planet_id).name}."
+        self._record(message)
+        return message
+
+    def _derive_species(
+        self,
+        parent: SpeciesProfile,
+        suffix: str,
+        changes: dict[str, object],
+    ) -> SpeciesProfile:
+        species_id = f"{parent.species_id}-{suffix}"
+        if species_id in self.species_catalog:
+            species_id = f"{species_id}-{len(self.species_catalog)}"
+        species = replace(
+            parent,
+            species_id=species_id,
+            name=str(changes.pop("name", f"{parent.name} {suffix.replace('-', ' ').title()}")),
+            derived_from=parent.species_id,
+            **changes,
+        )
+        self.species_catalog[species_id] = species
+        return species
+
+    def _evolve_colony(self, colony: ColonyState, planet: SystemObject) -> None:
+        parent = self.species_catalog[colony.species_id]
+        evolved = self._derive_species(
+            parent,
+            f"evolved-{planet.climate.casefold().replace(' ', '-')}",
+            {
+                "name": f"{parent.name} (Adapted)",
+                "preferred_climates": (*parent.preferred_climates, planet.climate),
+                "traits": (*parent.traits, f"Natural {planet.climate} adaptation"),
+            },
+        )
+        self.species_rights[evolved.species_id] = self.species_rights.get(
+            parent.species_id,
+            "citizen",
+        )
+        colony.species_id = evolved.species_id
+        colony.evolution_progress = 0.0
+        self._record(
+            f"Species evolution: {evolved.name} adapted to {planet.climate} conditions on {planet.name}."
+        )
 
     def establish_first_contact(self, empire_id: str) -> str:
         empire = self.get_empire(empire_id)
@@ -719,22 +919,38 @@ class Campaign:
                     planet.population_capacity_billions - population,
                 )
                 food_factor = 1.0 if self.food > 0 else 0.25
+                rights_factor = {
+                    "citizen": 1.0,
+                    "resident": 0.9,
+                    "restricted": 0.65,
+                }[self.species_rights.get(colony.species_id, "resident")]
                 colony.population_billions += min(
                     room,
                     population
                     * species.annual_growth_rate
                     * climate_factor
                     * food_factor
+                    * rights_factor
                     * delta
                     / 365.0,
                 )
+                if planet.climate not in species.preferred_climates:
+                    colony.evolution_progress += delta / 365.0 * 0.1
+                    if colony.evolution_progress >= 1.0:
+                        colony.evolution_progress -= 1.0
+                        self._evolve_colony(colony, planet)
                 colony.happiness = min(
                     1.0,
                     max(
                         0.0,
                         0.75
                         + (0.08 if self.food > 0 else -0.3)
-                        + (0.06 if climate_factor == 1.0 else -0.08),
+                        + (0.06 if climate_factor == 1.0 else -0.08)
+                        + {
+                            "citizen": 0.0,
+                            "resident": -0.05,
+                            "restricted": -0.2,
+                        }[self.species_rights.get(colony.species_id, "resident")],
                     ),
                 )
             for building_id in colony.buildings:
@@ -1047,9 +1263,17 @@ class Campaign:
     def to_dict(self) -> dict[str, object]:
         """Return a complete JSON-compatible snapshot of the campaign."""
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "galaxy": asdict(self.galaxy),
             "player_species_id": self.player_species_id,
+            "name_culture": self.name_culture,
+            "leader_name": self.leader_name,
+            "custom_species": [
+                profile.to_dict()
+                for profile in self.species_catalog.values()
+                if profile.derived_from is not None
+            ],
+            "species_rights": dict(self.species_rights),
             "elapsed_days": self.elapsed_days,
             "alloys": self.alloys,
             "science": self.science,
@@ -1081,7 +1305,7 @@ class Campaign:
         content_path: Path | None = None,
     ) -> "Campaign":
         version = data.get("schema_version")
-        if version not in (1, 2):
+        if version not in (1, 2, 3):
             raise ValueError(f"Unsupported campaign version: {data.get('schema_version')}")
         galaxy_data = data.get("galaxy")
         if not isinstance(galaxy_data, dict):
@@ -1093,9 +1317,32 @@ class Campaign:
             shape=str(galaxy_data["shape"]),
             galaxy_name=None,
             player_species_id=str(data["player_species_id"]),
+            name_culture=str(data.get("name_culture", "all")),
             content_path=content_path,
         )
         try:
+            custom_species = [
+                SpeciesProfile.from_dict(item)
+                for item in data.get("custom_species", [])
+            ]
+            for profile in custom_species:
+                if (
+                    profile.species_id in campaign.species_catalog
+                    or profile.derived_from not in campaign.species_catalog
+                    or not profile.name
+                    or profile.lifespan_years <= 0
+                    or not math.isfinite(profile.annual_growth_rate)
+                    or profile.annual_growth_rate < 0
+                    or not profile.classification
+                    or not profile.preferred_climates
+                    or not profile.traits
+                    or not profile.needs
+                    or not profile.name_sets
+                    or Path(profile.portrait).is_absolute()
+                    or ".." in Path(profile.portrait).parts
+                ):
+                    raise ValueError("Invalid custom species in save")
+                campaign.species_catalog[profile.species_id] = profile
             systems = [
                 StarSystem(
                     **{
@@ -1142,6 +1389,28 @@ class Campaign:
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("Save contains invalid campaign data") from error
 
+        if version >= 3:
+            raw_rights = data.get("species_rights")
+            if not isinstance(raw_rights, dict):
+                raise ValueError("Save contains invalid species rights")
+            species_rights = {
+                str(species_id): str(rights)
+                for species_id, rights in raw_rights.items()
+            }
+            if any(
+                species_id not in campaign.species_catalog
+                or rights not in {"citizen", "resident", "restricted"}
+                for species_id, rights in species_rights.items()
+            ):
+                raise ValueError("Save contains invalid species rights")
+            campaign.species_rights = species_rights
+            campaign.leader_name = str(data.get("leader_name", campaign.leader_name))
+            if (
+                not campaign.leader_name
+                or campaign.name_culture not in campaign.species_catalog[campaign.player_species_id].name_cultures
+            ):
+                raise ValueError("Save contains an invalid species identity")
+
         system_ids = {system.system_id for system in systems}
         if len(system_ids) != len(systems):
             raise ValueError("Save contains duplicate star systems")
@@ -1164,6 +1433,9 @@ class Campaign:
                     and colony.construction not in campaign.game_content.buildings
                 )
                 or colony.construction_days_remaining < 0
+                or not math.isfinite(colony.evolution_progress)
+                or colony.evolution_progress < 0
+                or colony.evolution_progress >= 1
             ):
                 raise ValueError("Save contains an invalid colony")
         route_edges = {

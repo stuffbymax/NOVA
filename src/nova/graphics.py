@@ -3,12 +3,13 @@
 from collections import deque
 import logging
 import math
+import random
 
 import pygame
 
 from .application import Application
 from .assets import AssetError, AssetManager
-from .campaign import StarSystem, SystemObject
+from .campaign import Campaign, ColonyState, StarSystem, SystemObject
 from .config import Config
 from .persistence import SaveError
 from .ui import (
@@ -47,14 +48,18 @@ class GameWindow:
         self._menu_active = False
         self._menu_message = ""
         self._selected_species_id = application.campaign.player_species_id
+        self._selected_name_culture = "all"
         self._menu_buttons: list[Button] = []
         self._species_card_rects: dict[str, pygame.Rect] = {}
+        self._name_culture_rect = pygame.Rect(0, 0, 1, 1)
+        self._species_destination: Dropdown | None = None
         self._fullscreen = config.fullscreen
         self._windowed_size = (config.window_width, config.window_height)
         self._speed_index = 1
         self._selected_system = "sol"
         self._selected_object = "earth"
         self._planet_view = "DETAILS"
+        self._species_selected_colony: tuple[str, str] | None = None
         self._active_tab = "GALAXY"
         self._galaxy_zoom = 0.9
         self._system_zoom = 0.92
@@ -78,6 +83,9 @@ class GameWindow:
         self._owner_route_cache: dict[str, set[tuple[str, str]]] = {}
         self._nebula_cache: dict[
             tuple[tuple[int, int], tuple[int, int, int]], pygame.Surface
+        ] = {}
+        self._planet_illustration_cache: dict[
+            tuple[str, str, str, tuple[int, int]], pygame.Surface
         ] = {}
         self._bounds = pygame.Rect(0, 0, config.window_width, config.window_height)
         self.ui = UIManager(Theme())
@@ -325,33 +333,10 @@ class GameWindow:
             self._draw_galaxy_map()
             self._draw_map_card()
 
-        pygame.draw.rect(self.screen, theme.panel, (0, 0, width, 54))
-        font = self.ui.fonts.get(26)
-        small_font = self.ui.fonts.get(18)
-        self._label("NOVA", (22, 14), font, theme.accent)
         campaign = self.application.campaign
-        resource_line = (
-            (
-                f"{campaign.date_label}  A:{campaign.alloys:.0f}  "
-                f"S:{campaign.science:.0f}  I:{campaign.influence:.0f}  "
-                f"V:{campaign.volatiles:.0f}  E:{campaign.energy:.0f}  "
-                f"F:{campaign.food:.0f}"
-            )
-            if width < 900
-            else (
-                f"FRONTIER  {campaign.date_label}    "
-                f"ALLOYS {campaign.alloys:.0f}    "
-                f"SCIENCE {campaign.science:.0f}    "
-                f"INFLUENCE {campaign.influence:.0f}    "
-                f"VOLATILES {campaign.volatiles:.0f}    "
-                f"ENERGY {campaign.energy:.0f}    FOOD {campaign.food:.0f}"
-            )
-        )
-        resource_font = small_font if width >= 900 else self.ui.fonts.get(14)
-        self._label(resource_line, (120, 19), resource_font, theme.text)
         paused = self.application.engine.clock.paused
-        status = "PAUSED" if paused else "LIVE"
-        self._label(status, (width - 80, 19), small_font, theme.accent)
+        self._draw_command_hud(width, campaign, paused)
+        small_font = self.ui.fonts.get(18)
 
         self.windows.draw(self.screen, small_font, theme)
         assert self.tabs is not None
@@ -391,6 +376,10 @@ class GameWindow:
             self._draw_diplomacy(small_font)
             self.action_button.label = "CONFIRM DIPLOMATIC ACTION"
             self.action_button.draw(self.screen, small_font, theme)
+        elif self.tabs.active == "SPECIES":
+            self._draw_species(small_font, height < 560)
+            self.action_button.label = "APPLY SPECIES ACTION"
+            self.action_button.draw(self.screen, small_font, theme)
         else:
             self._draw_empire(small_font, height < 560)
             self.action_button.label = "BUILD SELECTED"
@@ -428,6 +417,11 @@ class GameWindow:
                 "Survey rival territory to establish contact  |  negotiate, form pacts, "
                 "or declare war  |  fleets engage hostile systems"
             )
+        elif self.tabs.active == "SPECIES":
+            help_text = (
+                "Select a colony and species action  |  Xenobiology unlocks engineering "
+                "and synthetic conversion  |  N changes naming culture in new game"
+            )
         elif self.tabs.active == "CHRONICLE":
             help_text = "Empire history  |  F5 save  F9 load  F10 menu"
         else:
@@ -436,11 +430,88 @@ class GameWindow:
                 "P borders  T trade  R resources  S sensors  F fog  E explore  "
                 "Ctrl+B bookmark  B next  Space pause  F5 save  F9 load  F10 menu"
             )
-        help_font = self.ui.fonts.get(11) if self.tabs.active == "GALAXY" else (
+        help_font = self.ui.fonts.get(13) if self.tabs.active == "GALAXY" else (
             self.ui.fonts.get(13) if width < 900 else small_font
         )
         self._label(help_text, (18, height - 22), help_font, theme.muted)
         self.ui.draw_overlays(self.screen, small_font, small_font)
+
+    def _draw_command_hud(
+        self,
+        width: int,
+        campaign: Campaign,
+        paused: bool,
+    ) -> None:
+        assert self.screen is not None
+        theme = self.ui.theme
+        bar = pygame.Rect(0, 0, width, 54)
+        pygame.draw.rect(self.screen, (4, 10, 20), bar)
+        pygame.draw.line(self.screen, (41, 79, 98), (0, 53), (width, 53), 1)
+
+        crest = pygame.Rect(14, 8, 36, 36)
+        pygame.draw.rect(self.screen, theme.panel_alt, crest, border_radius=5)
+        pygame.draw.rect(self.screen, theme.accent, crest, 1, border_radius=5)
+        self._label("N", (26, 13), self.ui.fonts.get(23), theme.accent)
+        self._label("NOVA", (58, 15), self.ui.fonts.get(20), theme.text)
+
+        resources = (
+            ("ALLOYS", campaign.alloys, (221, 165, 92)),
+            ("SCIENCE", campaign.science, (113, 204, 235)),
+            ("INFLUENCE", campaign.influence, (196, 146, 230)),
+            ("VOLATILES", campaign.volatiles, (228, 119, 105)),
+            ("ENERGY", campaign.energy, (243, 211, 105)),
+            ("FOOD", campaign.food, (129, 211, 133)),
+        )
+        start_x = 122
+        reserved_right = 184
+        resource_width = max(42, (width - start_x - reserved_right) // len(resources))
+        compact_labels = width < 900
+        for index, (name, value, color) in enumerate(resources):
+            x = start_x + index * resource_width
+            pygame.draw.line(
+                self.screen,
+                (31, 51, 68),
+                (x - 8, 10),
+                (x - 8, 44),
+                1,
+            )
+            pygame.draw.circle(self.screen, color, (x, 19), 3)
+            label = name[:4] if compact_labels else name
+            self._label(
+                label,
+                (x + 8, 12),
+                self.ui.fonts.get(12 if compact_labels else 13),
+                theme.muted,
+            )
+            self._label(
+                f"{value:,.0f}",
+                (x + 8, 26),
+                self.ui.fonts.get(15 if compact_labels else 16),
+                color,
+            )
+
+        date_x = width - 178
+        pygame.draw.line(
+            self.screen,
+            (31, 51, 68),
+            (date_x - 12, 10),
+            (date_x - 12, 44),
+            1,
+        )
+        self._label(
+            campaign.date_label,
+            (date_x, 11),
+            self.ui.fonts.get(14),
+            theme.text,
+        )
+        status_color = theme.warning if paused else theme.accent
+        pygame.draw.circle(self.screen, status_color, (date_x + 5, 37), 3)
+        self._label(
+            "PAUSED" if paused else "RUNNING",
+            (date_x + 14, 30),
+            self.ui.fonts.get(12),
+            status_color,
+        )
 
     def _poll_campaign_news(self) -> None:
         campaign = self.application.campaign
@@ -495,18 +566,28 @@ class GameWindow:
                 button_height,
             )
         card_gap = 12
-        card_width = (width - 2 * margin - card_gap * 2) // 3
-        card_top = max(94, height // 4)
+        species_ids = list(self.application.campaign.species_catalog)
+        columns = min(4, len(species_ids))
+        card_width = (
+            width - 2 * margin - card_gap * (columns - 1)
+        ) // columns
+        card_top = max(138, height // 4)
         card_height = min(252, max(150, first_y - card_top - 28))
         self._species_card_rects = {
             species_id: pygame.Rect(
-                margin + index * (card_width + card_gap),
+                margin + (index % columns) * (card_width + card_gap),
                 card_top,
                 card_width,
                 card_height,
             )
-            for index, species_id in enumerate(self.application.campaign.species_catalog)
+            for index, species_id in enumerate(species_ids)
         }
+        self._name_culture_rect = pygame.Rect(
+            max(margin, width - margin - min(250, width // 3)),
+            card_top - 38,
+            min(250, width // 3),
+            30,
+        )
 
     def _handle_menu_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -514,14 +595,45 @@ class GameWindow:
                 self._menu_active = False
                 self.application.engine.clock.resume()
             return
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_n:
+            self._cycle_name_culture()
+            return
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self._name_culture_rect.collidepoint(event.pos):
+                self._cycle_name_culture()
+                return
             for species_id, rect in self._species_card_rects.items():
                 if rect.collidepoint(event.pos):
                     self._selected_species_id = species_id
+                    profile = self.application.campaign.species_catalog[species_id]
+                    if self._selected_name_culture not in self._menu_name_cultures(
+                        profile.name_cultures
+                    ):
+                        self._selected_name_culture = "all"
                     return
         for button in self._menu_buttons:
             if button.handle(event):
                 return
+
+    def _cycle_name_culture(self) -> None:
+        profile = self.application.campaign.species_catalog[
+            self._selected_species_id
+        ]
+        cultures = self._menu_name_cultures(profile.name_cultures)
+        current = (
+            self._selected_name_culture
+            if self._selected_name_culture in cultures
+            else "all"
+        )
+        index = cultures.index(current)
+        self._selected_name_culture = cultures[(index + 1) % len(cultures)]
+
+    @staticmethod
+    def _menu_name_cultures(cultures: tuple[str, ...]) -> tuple[str, ...]:
+        hierarchical = tuple(culture for culture in cultures if "/" in culture)
+        if hierarchical:
+            return ("all", *sorted(hierarchical))
+        return cultures
 
     def _draw_main_menu(self) -> None:
         assert self.screen is not None
@@ -539,9 +651,32 @@ class GameWindow:
         )
         self._label(
             "CHOOSE YOUR SPECIES",
-            (24, next(iter(self._species_card_rects.values())).y - 24),
+            (24, next(iter(self._species_card_rects.values())).y - 27),
             self.ui.fonts.get(14),
             theme.warning,
+        )
+        pygame.draw.rect(
+            self.screen,
+            theme.panel_alt,
+            self._name_culture_rect,
+            border_radius=4,
+        )
+        pygame.draw.rect(
+            self.screen,
+            theme.accent,
+            self._name_culture_rect,
+            1,
+            border_radius=4,
+        )
+        culture = self._selected_name_culture.rsplit("/", 1)[-1].title()
+        culture_label = self.ui.fonts.get(13).render(
+            f"NAMES: {culture}  (N)",
+            True,
+            theme.text,
+        )
+        self.screen.blit(
+            culture_label,
+            culture_label.get_rect(center=self._name_culture_rect.center),
         )
         for species_id, rect in self._species_card_rects.items():
             profile = self.application.campaign.species_catalog[species_id]
@@ -590,10 +725,14 @@ class GameWindow:
             )
 
     def _start_new_game(self) -> None:
-        self.application.new_game(self._selected_species_id)
+        self.application.new_game(
+            self._selected_species_id,
+            name_culture=self._selected_name_culture,
+        )
         self._selected_system = "sol"
         self._selected_object = "earth"
         self._planet_view = "DETAILS"
+        self._species_selected_colony = None
         self._menu_active = False
         self._menu_message = ""
         if self.tabs is not None:
@@ -648,12 +787,16 @@ class GameWindow:
         self.windows.add(panel)
         self.tabs = TabBar(
             pygame.Rect(0, 0, 1, 1),
-            ["GALAXY", "SYSTEM", "EMPIRE", "DIPLOMACY", "CHRONICLE"],
+            ["GALAXY", "SYSTEM", "EMPIRE", "SPECIES", "DIPLOMACY", "CHRONICLE"],
         )
         self.search = TextInput(pygame.Rect(0, 0, 1, 1), "Search...")
         self.dropdown = Dropdown(
             pygame.Rect(0, 0, 1, 1),
             ["All", "Uncharted", "Surveyed", "Colonized"],
+        )
+        self._species_destination = Dropdown(
+            pygame.Rect(0, 0, 1, 1),
+            [],
         )
         self.diplomatic_action = Dropdown(
             pygame.Rect(0, 0, 1, 1),
@@ -827,7 +970,7 @@ class GameWindow:
                     round(30 * scale),
                 )
                 if self.tabs is not None
-                and self.tabs.active in ("EMPIRE", "DIPLOMACY")
+                and self.tabs.active in ("EMPIRE", "DIPLOMACY", "SPECIES")
                 else pygame.Rect(0, 0, 1, 1)
             )
             assert self.diplomatic_action is not None
@@ -841,8 +984,25 @@ class GameWindow:
                 if self.tabs is not None and self.tabs.active == "DIPLOMACY"
                 else pygame.Rect(0, 0, 1, 1)
             )
+            assert self._species_destination is not None
+            self._species_destination.rect = (
+                pygame.Rect(
+                    content_x,
+                    self.dropdown.rect.bottom + gap,
+                    content_width,
+                    round(30 * scale),
+                )
+                if self.tabs is not None and self.tabs.active == "SPECIES"
+                else pygame.Rect(0, 0, 1, 1)
+            )
             if self.tabs is not None and self.tabs.active == "DIPLOMACY":
                 self.systems.rect.y = self.diplomatic_action.rect.bottom + gap
+                self.systems.rect.height = max(
+                    1,
+                    action_y - self.systems.rect.y - round(8 * scale),
+                )
+            elif self.tabs is not None and self.tabs.active == "SPECIES":
+                self.systems.rect.y = self._species_destination.rect.bottom + gap
                 self.systems.rect.height = max(
                     1,
                     action_y - self.systems.rect.y - round(8 * scale),
@@ -861,7 +1021,8 @@ class GameWindow:
                 content_width,
                 round(34 * scale),
             )
-            if self.tabs is None or self.tabs.active not in ("EMPIRE", "DIPLOMACY")
+            if self.tabs is None
+            or self.tabs.active not in ("EMPIRE", "DIPLOMACY", "SYSTEM", "SPECIES")
             else pygame.Rect(0, 0, 1, 1)
         )
         self.dropdown.rect = pygame.Rect(
@@ -871,7 +1032,12 @@ class GameWindow:
                 (
                     86
                     if self.tabs is not None
-                    and self.tabs.active in ("EMPIRE", "DIPLOMACY")
+                    and self.tabs.active in (
+                        "EMPIRE",
+                        "DIPLOMACY",
+                        "SYSTEM",
+                        "SPECIES",
+                    )
                     else 128
                 )
                 * scale
@@ -888,6 +1054,17 @@ class GameWindow:
                 round(34 * scale),
             )
             if self.tabs is not None and self.tabs.active == "DIPLOMACY"
+            else pygame.Rect(0, 0, 1, 1)
+        )
+        assert self._species_destination is not None
+        self._species_destination.rect = (
+            pygame.Rect(
+                content_x,
+                self.dropdown.rect.bottom + round(6 * scale),
+                content_width,
+                round(34 * scale),
+            )
+            if self.tabs is not None and self.tabs.active == "SPECIES"
             else pygame.Rect(0, 0, 1, 1)
         )
         bottom_row_y = rect.bottom - round(61 * scale)
@@ -967,6 +1144,8 @@ class GameWindow:
         table_y = (
             self.diplomatic_action.rect.bottom + round(8 * scale)
             if self.tabs is not None and self.tabs.active == "DIPLOMACY"
+            else self._species_destination.rect.bottom + round(8 * scale)
+            if self.tabs is not None and self.tabs.active == "SPECIES"
             else self.dropdown.rect.bottom + round(8 * scale)
         )
         reserved_details_height = round(
@@ -982,6 +1161,9 @@ class GameWindow:
                 else 220
                 if self.tabs is not None
                 and self.tabs.active == "SYSTEM"
+                else 160
+                if self.tabs is not None
+                and self.tabs.active == "SPECIES"
                 else 72
             )
             * scale
@@ -1015,6 +1197,11 @@ class GameWindow:
         if self._active_tab != self.tabs.active:
             self._active_tab = self.tabs.active
             self.search.focused = False
+            self.systems.columns = {
+                "GALAXY": ["SYSTEM", "STATUS", "WORLD"],
+                "SYSTEM": ["BODY", "TYPE", "WORLD"],
+                "SPECIES": ["COLONY", "SPECIES", "POPULATION"],
+            }.get(self.tabs.active, ["SYSTEM", "STATUS", "WORLD"])
             self._configure_visible_widgets()
             self._layout_ui()
             self.dropdown.options = self._dropdown_options()
@@ -1029,6 +1216,11 @@ class GameWindow:
         if self.tabs.active == "EMPIRE":
             return
         if self.tabs.active == "DIPLOMACY":
+            return
+        if self.tabs.active == "SPECIES":
+            self._ensure_species_colony_selection()
+            self.systems.set_rows(self._species_colony_rows())
+            self._refresh_species_destinations()
             return
         query = self.search.text.casefold().strip()
         category = self.dropdown.selected
@@ -1064,6 +1256,25 @@ class GameWindow:
 
     def _select_system(self, row: tuple[str, ...]) -> None:
         if self.tabs is None:
+            return
+        if self.tabs.active == "SPECIES":
+            colony = next(
+                (
+                    colony
+                    for colony in self.application.campaign.player_colonies
+                    if self._species_colony_label(colony) == row[0]
+                ),
+                None,
+            )
+            if colony is not None:
+                self._species_selected_colony = (
+                    colony.system_id,
+                    colony.planet_id,
+                )
+                self._refresh_species_destinations()
+                self.ui.notify(
+                    f"Selected {self._species_colony_label(colony)}"
+                )
             return
         if self.tabs.active == "GALAXY":
             system = next(
@@ -1490,9 +1701,95 @@ class GameWindow:
         system = self.application.campaign.get_system(self._selected_system)
         return [(obj.name, obj.kind, obj.world_type) for obj in system.objects]
 
+    def _species_colony_label(self, colony: ColonyState) -> str:
+        system = self.application.campaign.get_system(colony.system_id)
+        planet = self.application.campaign.get_object(
+            colony.system_id,
+            colony.planet_id,
+        )
+        return f"{system.name} / {planet.name}"
+
+    def _species_colony_rows(self) -> list[tuple[str, str, str]]:
+        campaign = self.application.campaign
+        rows = []
+        for colony in sorted(
+            campaign.player_colonies,
+            key=lambda item: (
+                campaign.get_system(item.system_id).name.casefold(),
+                campaign.get_object(item.system_id, item.planet_id).name.casefold(),
+            ),
+        ):
+            species = campaign.species_catalog[colony.species_id]
+            rows.append(
+                (
+                    self._species_colony_label(colony),
+                    species.name,
+                    f"{colony.population_billions:.2f}B",
+                )
+            )
+        return rows
+
+    def _ensure_species_colony_selection(self) -> None:
+        campaign = self.application.campaign
+        selected = self._species_selected_colony
+        if selected is not None:
+            colony = campaign.colony_states.get(
+                campaign.colony_key(*selected)
+            )
+            if colony is not None and colony in campaign.player_colonies:
+                return
+        colony = next(iter(campaign.player_colonies), None)
+        self._species_selected_colony = (
+            (colony.system_id, colony.planet_id)
+            if colony is not None
+            else None
+        )
+
+    def _selected_species_colony(self) -> ColonyState | None:
+        self._ensure_species_colony_selection()
+        if self._species_selected_colony is None:
+            return None
+        return self.application.campaign.colony_states.get(
+            self.application.campaign.colony_key(
+                *self._species_selected_colony
+            )
+        )
+
+    def _refresh_species_destinations(self) -> None:
+        if self._species_destination is None:
+            return
+        campaign = self.application.campaign
+        source = self._selected_species_colony()
+        destinations = (
+            []
+            if source is None
+            else [
+                colony
+                for colony in campaign.player_colonies
+                if colony is not source and colony.species_id == source.species_id
+            ]
+        )
+        self._species_destination.options = (
+            [self._species_colony_label(colony) for colony in destinations]
+            or ["No matching colony"]
+        )
+        if self._species_destination.selected not in self._species_destination.options:
+            self._species_destination.selected = self._species_destination.options[0]
+
     def _dropdown_options(self) -> list[str]:
         if self.tabs is not None and self.tabs.active == "DIPLOMACY":
             return [empire.name for empire in self.application.campaign.ai_empires]
+        if self.tabs is not None and self.tabs.active == "SPECIES":
+            return [
+                "Citizen rights",
+                "Resident rights",
+                "Restricted rights",
+                "Climate adaptation",
+                "Enhanced growth",
+                "Extended lifespan",
+                "Synthetic conversion",
+                "Migrate population",
+            ]
         if self.tabs is not None and self.tabs.active == "EMPIRE":
             campaign = self.application.campaign
             return [
@@ -1588,7 +1885,6 @@ class GameWindow:
         elif self.tabs.active == "SYSTEM":
             self._widgets = [
                 self.tabs,
-                self.search,
                 self.dropdown,
                 self.systems,
                 self.action_button,
@@ -1605,6 +1901,16 @@ class GameWindow:
                 self.research_button,
                 self.create_fleet_button,
                 self.move_fleet_button,
+                *common[1:],
+            ]
+        elif self.tabs.active == "SPECIES":
+            assert self._species_destination is not None
+            self._widgets = [
+                self.tabs,
+                self.dropdown,
+                self._species_destination,
+                self.systems,
+                self.action_button,
                 *common[1:],
             ]
         elif self.tabs.active == "DIPLOMACY":
@@ -1729,22 +2035,23 @@ class GameWindow:
         bounds: pygame.Rect,
     ) -> list[tuple[str, str, pygame.Rect]]:
         options = self._map_layer_options()
-        gap = 4
+        columns = 4
+        gap = 6
         x = bounds.x + 12
-        y = bounds.y + 46
-        height = 24
-        available_width = max(1, bounds.width - 24 - gap * (len(options) - 1))
-        button_width = available_width // len(options)
+        first_row_y = bounds.y + 48
+        height = 26
+        available_width = max(1, bounds.width - 24 - gap * (columns - 1))
+        button_width = available_width // columns
         return [
             (
                 attribute,
                 label,
                 pygame.Rect(
-                    x + index * (button_width + gap),
-                    y,
+                    x + (index % columns) * (button_width + gap),
+                    first_row_y + (index // columns) * (height + gap),
                     button_width
-                    if index < len(options) - 1
-                    else bounds.right - 12 - (x + index * (button_width + gap)),
+                    if index % columns < columns - 1
+                    else bounds.right - 12 - (x + (index % columns) * (button_width + gap)),
                     height,
                 ),
             )
@@ -1779,7 +2086,7 @@ class GameWindow:
     def _draw_map_layer_controls(self, bounds: pygame.Rect) -> None:
         assert self.screen is not None
         theme = self.ui.theme
-        font = self.ui.fonts.get(10)
+        font = self.ui.fonts.get(12)
         for attribute, label, rect in self._map_layer_button_rects(bounds):
             active = getattr(self, attribute)
             surface = pygame.Surface(rect.size, pygame.SRCALPHA)
@@ -1938,7 +2245,34 @@ class GameWindow:
                         max(2, radius // 2),
                     )
             if system.system_id == self._selected_system:
-                pygame.draw.circle(self.screen, theme.text, position, radius + 6, 1)
+                pygame.draw.circle(
+                    self.screen,
+                    (25, 115, 137),
+                    position,
+                    radius + 12,
+                    1,
+                )
+                pygame.draw.circle(
+                    self.screen,
+                    theme.text,
+                    position,
+                    radius + 7,
+                    1,
+                )
+                pygame.draw.line(
+                    self.screen,
+                    (114, 216, 226),
+                    (position[0] - radius - 5, position[1]),
+                    (position[0] + radius + 5, position[1]),
+                    1,
+                )
+                pygame.draw.line(
+                    self.screen,
+                    (114, 216, 226),
+                    (position[0], position[1] - radius - 5),
+                    (position[0], position[1] + radius + 5),
+                    1,
+                )
             if system.system_id in campaign.map_bookmarks:
                 pygame.draw.circle(self.screen, (255, 220, 112), position, radius + 13, 1)
             if self._show_resources and system.surveyed:
@@ -1955,7 +2289,7 @@ class GameWindow:
                         self._label(
                             f"R{resources}",
                             (marker[0] + 4, marker[1] - 6),
-                            self.ui.fonts.get(11),
+                            self.ui.fonts.get(12),
                             (255, 203, 100),
                         )
             label_priority = (
@@ -2000,7 +2334,7 @@ class GameWindow:
                     self._label(
                         fleet.name,
                         (fleet_position[0] + 10, fleet_position[1] - 6),
-                        self.ui.fonts.get(11),
+                        self.ui.fonts.get(12),
                         (110, 231, 245)
                         if fleet.owner_id == "union"
                         else (255, 123, 111),
@@ -2042,7 +2376,7 @@ class GameWindow:
         pygame.draw.rect(self.screen, theme.muted, bounds, 1)
         previous_clip = self.screen.get_clip()
         self.screen.set_clip(bounds)
-        header = pygame.Surface((max(1, bounds.width - 8), 94), pygame.SRCALPHA)
+        header = pygame.Surface((max(1, bounds.width - 8), 136), pygame.SRCALPHA)
         pygame.draw.rect(
             header,
             (5, 11, 22, 220),
@@ -2067,11 +2401,11 @@ class GameWindow:
                 f"{campaign.galaxy.diameter_light_years:,} LY  /  {self._galaxy_zoom:.1f}x"
             ),
             (bounds.x + 12, bounds.y + 28),
-            self.ui.fonts.get(13),
+            self.ui.fonts.get(14),
             theme.muted,
         )
         self._draw_map_layer_controls(bounds)
-        legend_y = bounds.y + 76
+        legend_y = bounds.y + 111
         legend_x = bounds.x + 12
         if self._show_borders:
             for owner in territory_owners:
@@ -2080,17 +2414,17 @@ class GameWindow:
                 self._label(
                     owner.upper(),
                     (legend_x + 12, legend_y),
-                    self.ui.fonts.get(10),
+                    self.ui.fonts.get(12),
                     theme.muted,
                 )
-                legend_x += self.ui.fonts.get(10).size(owner.upper())[0] + 26
+                legend_x += self.ui.fonts.get(12).size(owner.upper())[0] + 26
                 if legend_x > bounds.right - 72:
                     break
         else:
             self._label(
                 "POLITICAL BORDERS HIDDEN",
                 (legend_x, legend_y),
-                self.ui.fonts.get(10),
+                self.ui.fonts.get(12),
                 theme.muted,
             )
         self.screen.set_clip(previous_clip)
@@ -2102,8 +2436,15 @@ class GameWindow:
             return
         theme = self.ui.theme
         card = pygame.Rect(bounds.x + 8, bounds.bottom - 106, bounds.width - 16, 96)
-        pygame.draw.rect(self.screen, theme.panel, card, border_radius=5)
-        pygame.draw.rect(self.screen, theme.muted, card, 1, border_radius=5)
+        pygame.draw.rect(self.screen, (5, 12, 24), card, border_radius=5)
+        pygame.draw.rect(self.screen, (53, 89, 112), card, 1, border_radius=5)
+        pygame.draw.line(
+            self.screen,
+            theme.accent,
+            (card.x + 2, card.y + 10),
+            (card.x + 2, card.bottom - 10),
+            2,
+        )
         system = self.application.campaign.get_system(self._selected_system)
         image_center = (card.x + 54, card.centery)
         pygame.draw.circle(self.screen, (48, 113, 144), image_center, 29, 1)
@@ -2143,7 +2484,7 @@ class GameWindow:
                 f"{system.owner.upper() if system.owner else 'UNCLAIMED'}"
             ),
             (text_x, card.y + 27),
-            self.ui.fonts.get(14),
+            self.ui.fonts.get(12),
             status_color,
         )
         description_font = self.ui.fonts.get(14)
@@ -2490,6 +2831,9 @@ class GameWindow:
         if is_planet and self._planet_view == "HISTORY":
             self._draw_planet_history(system_object, font, left, y, compact)
             return
+        if is_planet and system_object.surveyed:
+            self._draw_planet_dossier(system_object, left, y, compact)
+            return
         self._label(
             "M MANAGEMENT  |  H HISTORY  |  D DETAILS",
             (left, y),
@@ -2587,6 +2931,285 @@ class GameWindow:
             )[:2]:
                 self._label(line, (left, detail_y), description_font, theme.warning)
                 detail_y += 17
+
+    def _draw_planet_dossier(
+        self,
+        planet: SystemObject,
+        left: int,
+        y: int,
+        compact: bool,
+    ) -> None:
+        assert self.screen is not None
+        assert self.systems is not None
+        theme = self.ui.theme
+        width = self.systems.rect.width - 6
+        self._label(
+            "M MANAGEMENT  |  H HISTORY  |  D PLANET DETAILS",
+            (left, y),
+            self.ui.fonts.get(11 if compact else 12),
+            theme.muted,
+        )
+
+        image_size = 52 if compact else 64
+        image_rect = pygame.Rect(left, y + 22, image_size, image_size)
+        self._draw_planet_illustration(planet, image_rect)
+        text_left = image_rect.right + 10
+        self._label(
+            planet.name.upper(),
+            (text_left, y + 24),
+            self.ui.fonts.get(14 if compact else 16),
+            theme.accent,
+        )
+        self._label(
+            f"{planet.world_type.upper()}  /  {planet.kind.upper()}",
+            (text_left, y + 45),
+            self.ui.fonts.get(10 if compact else 11),
+            theme.text,
+        )
+        self._label(
+            (
+                f"COLONY  {planet.owner or 'NONE'}"
+                if planet.colonized
+                else "SURVEY COMPLETE  /  NO SETTLEMENT"
+            ),
+            (text_left, y + 63),
+            self.ui.fonts.get(10 if compact else 11),
+            theme.warning if planet.colonized else theme.muted,
+        )
+        if planet.orbit_au is not None and not compact:
+            self._label(
+                f"ORBIT  {planet.orbit_au:.2f} AU",
+                (text_left, y + 80),
+                self.ui.fonts.get(10 if compact else 11),
+                theme.muted,
+            )
+
+        details_y = image_rect.bottom + 5
+        gap = 8
+        column_width = max(1, (width - gap) // 2)
+        population = planet.population if planet.colonized else "Unsettled"
+        capacity = (
+            f"{planet.population_capacity_billions:.1f}B"
+            if planet.population_capacity_billions > 0
+            else "Not suitable"
+        )
+        stats = (
+            ("POPULATION", population),
+            ("CAPACITY", capacity),
+            ("CLIMATE", planet.climate),
+            (
+                "HABITABILITY",
+                "Habitable" if planet.habitable else "Hostile",
+            ),
+            (
+                "GRAVITY",
+                f"{planet.gravity_earth:.2f} g"
+                if planet.gravity_earth is not None
+                else "Unknown",
+            ),
+            ("ATMOSPHERE", planet.atmosphere),
+        )
+        if compact:
+            stats = stats[:4]
+        row_height = 27 if compact else 25
+        row_gap = 3 if compact else 2
+        for index, (label, value) in enumerate(stats):
+            column = index % 2
+            row = index // 2
+            rect = pygame.Rect(
+                left + column * (column_width + gap),
+                details_y + row * (row_height + row_gap),
+                column_width,
+                row_height,
+            )
+            pygame.draw.rect(self.screen, theme.panel_alt, rect, border_radius=3)
+            pygame.draw.rect(self.screen, (47, 76, 98), rect, 1, border_radius=3)
+            self._label(
+                label,
+                (rect.x + 6, rect.y + 3),
+                self.ui.fonts.get(12),
+                theme.muted,
+            )
+            self._label(
+                value,
+                (rect.x + 6, rect.y + 13),
+                self.ui.fonts.get(12),
+                theme.text if label not in ("POPULATION", "HABITABILITY") else theme.accent,
+            )
+
+        rows = (len(stats) + 1) // 2
+        terrain_y = details_y + rows * (row_height + row_gap) + 1
+        self._label(
+            "TERRAIN",
+            (left, terrain_y),
+            self.ui.fonts.get(12),
+            theme.muted,
+        )
+        terrain_lines = self._wrap_text(
+            self.ui.fonts.get(12),
+            planet.surface_conditions,
+            width,
+        )
+        for index, line in enumerate(terrain_lines[:1] if compact else terrain_lines[:2]):
+            self._label(
+                line,
+                (left, terrain_y + 14 + index * 14),
+                self.ui.fonts.get(12),
+                theme.text,
+            )
+        if planet.surveyed and planet.resources:
+            deposits = "DEPOSITS  " + "  /  ".join(
+                f"{name} {amount}" for name, amount in planet.resources.items()
+            )
+            deposit_y = terrain_y + (27 if compact else 40)
+            self._label(
+                deposits,
+                (left, deposit_y),
+                self.ui.fonts.get(12),
+                theme.warning,
+            )
+
+    def _draw_planet_illustration(
+        self,
+        planet: SystemObject,
+        rect: pygame.Rect,
+    ) -> None:
+        assert self.screen is not None
+        key = (
+            self._selected_system,
+            planet.object_id,
+            planet.world_type,
+            rect.size,
+        )
+        illustration = self._planet_illustration_cache.get(key)
+        if illustration is not None:
+            self.screen.blit(illustration, rect.topleft)
+            return
+
+        illustration = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(illustration, (5, 11, 22), illustration.get_rect(), border_radius=5)
+        pygame.draw.rect(illustration, (45, 80, 105), illustration.get_rect(), 1, border_radius=5)
+        center = rect.center
+        center = center[0] - rect.x, center[1] - rect.y
+        radius = max(12, min(rect.width, rect.height) // 2 - 9)
+        seed_key = f"{self._selected_system}:{planet.object_id}"
+        seed = sum((index + 1) * ord(char) for index, char in enumerate(seed_key))
+        rng = random.Random(seed)
+        base_color = self._planet_color(planet)
+        orb = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        orb_center = (radius, radius)
+        pygame.draw.circle(orb, base_color, orb_center, radius)
+
+        features = pygame.Surface(orb.get_size(), pygame.SRCALPHA)
+        world = planet.world_type.casefold()
+        if "gas" in world:
+            band_colors = ((223, 185, 133, 180), (124, 96, 75, 170), (238, 210, 164, 170))
+            for index, band_y in enumerate(range(8, radius * 2, max(8, radius // 3))):
+                band = pygame.Rect(
+                    -radius // 2,
+                    band_y,
+                    radius * 3,
+                    max(3, radius // 5),
+                )
+                pygame.draw.ellipse(
+                    features,
+                    band_colors[index % len(band_colors)],
+                    band,
+                )
+        else:
+            terrain_color = (
+                (72, 151, 92)
+                if any(kind in world for kind in ("temperate", "jungle"))
+                else (184, 145, 87)
+                if any(kind in world for kind in ("desert", "arid"))
+                else (205, 225, 228)
+                if any(kind in world for kind in ("arctic", "ice", "frozen"))
+                else (91, 104, 119)
+                if any(kind in world for kind in ("barren", "airless"))
+                else (108, 128, 74)
+                if "toxic" in world
+                else (165, 77, 54)
+                if any(kind in world for kind in ("volcanic", "scorched"))
+                else (65, 145, 92)
+            )
+            for _ in range(8):
+                feature_center = (
+                    rng.randrange(-radius // 2, radius * 2 + radius // 2),
+                    rng.randrange(-radius // 3, radius * 2 + radius // 3),
+                )
+                feature_radius = rng.randrange(max(3, radius // 7), max(5, radius // 2))
+                points = []
+                for point_index in range(8):
+                    angle = point_index * math.tau / 8
+                    scale = rng.uniform(0.65, 1.15)
+                    points.append(
+                        (
+                            round(feature_center[0] + math.cos(angle) * feature_radius * scale),
+                            round(feature_center[1] + math.sin(angle) * feature_radius * scale),
+                        )
+                    )
+                pygame.draw.polygon(features, (*terrain_color, 190), points)
+            if "ocean" in world or "temperate" in world or "jungle" in world:
+                for _ in range(4):
+                    cloud_center = (
+                        rng.randrange(radius * 2),
+                        rng.randrange(radius * 2),
+                    )
+                    pygame.draw.ellipse(
+                        features,
+                        (205, 225, 232, 65),
+                        pygame.Rect(*cloud_center, radius // 2 + 3, max(2, radius // 7)),
+                    )
+            elif any(kind in world for kind in ("arctic", "ice", "frozen")):
+                pygame.draw.ellipse(
+                    features,
+                    (231, 244, 241, 220),
+                    pygame.Rect(radius // 2, 1, radius, max(5, radius // 3)),
+                )
+                pygame.draw.ellipse(
+                    features,
+                    (231, 244, 241, 210),
+                    pygame.Rect(radius // 2, radius * 2 - radius // 3, radius, radius // 3),
+                )
+            elif any(kind in world for kind in ("volcanic", "scorched")):
+                for _ in range(4):
+                    point = (rng.randrange(radius * 2), rng.randrange(radius * 2))
+                    pygame.draw.circle(features, (255, 170, 72, 210), point, max(2, radius // 10))
+                    pygame.draw.circle(features, (59, 38, 38, 220), point, max(1, radius // 16))
+
+        mask = pygame.mask.from_surface(orb)
+        mask_surface = mask.to_surface(
+            setcolor=(255, 255, 255, 255),
+            unsetcolor=(0, 0, 0, 0),
+        )
+        features.blit(mask_surface, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        orb.blit(features, (0, 0))
+        shadow = pygame.Surface(orb.get_size(), pygame.SRCALPHA)
+        pygame.draw.ellipse(
+            shadow,
+            (4, 8, 20, 118),
+            pygame.Rect(radius, -radius // 3, radius * 2, radius * 8 // 3),
+        )
+        shadow.blit(mask_surface, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        orb.blit(shadow, (0, 0))
+
+        if "gas" in world:
+            pygame.draw.ellipse(
+                illustration,
+                (184, 154, 119),
+                pygame.Rect(center[0] - radius - 5, center[1] - radius // 3, radius * 2 + 10, radius * 2 // 3),
+                2,
+            )
+        pygame.draw.circle(
+            illustration,
+            (69, 154, 184),
+            center,
+            radius + 3,
+            1,
+        )
+        illustration.blit(orb, (center[0] - radius, center[1] - radius))
+        self._planet_illustration_cache[key] = illustration
+        self.screen.blit(illustration, rect.topleft)
 
     def _draw_planet_management(
         self,
@@ -2862,7 +3485,7 @@ class GameWindow:
         self._label(
             f"LIFESPAN {species.lifespan_years} YEARS  |  {', '.join(species.traits)}",
             (x + image_size + 8, y + 56),
-            self.ui.fonts.get(11),
+            self.ui.fonts.get(12),
             theme.text,
         )
         y += image_size + 12
@@ -2952,6 +3575,67 @@ class GameWindow:
             self.dropdown.selected = self.dropdown.options[0]
         self.dropdown.draw(self.screen, self.ui.fonts.get(13), theme)
 
+    def _draw_species(self, font: pygame.font.Font, compact: bool) -> None:
+        assert self.screen is not None
+        assert self.overview is not None
+        assert self.dropdown is not None
+        assert self.systems is not None
+        assert self._species_destination is not None
+        campaign = self.application.campaign
+        theme = self.ui.theme
+        self.systems.draw(self.screen, font, theme)
+        self.dropdown.options = self._dropdown_options()
+        if self.dropdown.options and self.dropdown.selected not in self.dropdown.options:
+            self.dropdown.selected = self.dropdown.options[0]
+        self.dropdown.draw(self.screen, font, theme)
+        self._refresh_species_destinations()
+        self._species_destination.draw(self.screen, font, theme)
+        if compact:
+            return
+
+        colony = self._selected_species_colony()
+        if colony is None:
+            return
+        species = campaign.species_catalog[colony.species_id]
+        planet = campaign.get_object(colony.system_id, colony.planet_id)
+        system = campaign.get_system(colony.system_id)
+        rights = campaign.species_rights.get(species.species_id, "resident")
+        x = self.systems.rect.x + 2
+        y = self.systems.rect.bottom + 8
+        image_size = 44
+        portrait = self._scaled_asset(species.portrait, (image_size, image_size))
+        self.screen.blit(portrait, (x, y))
+        self._label(
+            f"{species.name}  |  {rights.title()}",
+            (x + image_size + 8, y + 2),
+            self.ui.fonts.get(15),
+            theme.accent,
+        )
+        self._label(
+            f"{system.name} / {planet.name}  |  {colony.population_billions:.2f}B",
+            (x + image_size + 8, y + 23),
+            self.ui.fonts.get(12),
+            theme.text,
+        )
+        climate_status = (
+            "Adapted"
+            if planet.climate in species.preferred_climates
+            else f"Evolution {colony.evolution_progress:.0%}"
+        )
+        lines = [
+            f"Lifespan {species.lifespan_years} years  |  Growth {species.annual_growth_rate:.1%}",
+            f"Climate {planet.climate}  |  {climate_status}",
+            f"Needs: {', '.join(species.needs)}",
+            f"Traits: {', '.join(species.traits)}",
+        ]
+        line_y = y + image_size + 7
+        max_width = self.overview.rect.width - 30
+        for line in lines:
+            wrapped = self._wrap_text(self.ui.fonts.get(12), line, max_width)
+            for text in wrapped:
+                self._label(text, (x, line_y), self.ui.fonts.get(12), theme.text)
+                line_y += 16
+
     def _research_button_label(self) -> str:
         campaign = self.application.campaign
         if campaign.active_technology is None:
@@ -3030,6 +3714,9 @@ class GameWindow:
         if self.tabs is not None and self.tabs.active == "DIPLOMACY":
             self._perform_diplomatic_action()
             return
+        if self.tabs is not None and self.tabs.active == "SPECIES":
+            self._perform_species_action()
+            return
         if self.tabs is not None and self.tabs.active == "EMPIRE":
             assert self.dropdown is not None
             campaign = self.application.campaign
@@ -3069,6 +3756,70 @@ class GameWindow:
             return
         self.ui.notify(message)
         self._filter_content()
+
+    def _perform_species_action(self) -> None:
+        assert self.dropdown is not None
+        assert self._species_destination is not None
+        campaign = self.application.campaign
+        colony = self._selected_species_colony()
+        if colony is None:
+            self.ui.notify("Found a colony before managing species")
+            return
+        action = self.dropdown.selected
+        rights_actions = {
+            "Citizen rights": "citizen",
+            "Resident rights": "resident",
+            "Restricted rights": "restricted",
+        }
+        engineering_actions = {
+            "Climate adaptation": "climate-adaptation",
+            "Enhanced growth": "enhanced-growth",
+            "Extended lifespan": "extended-lifespan",
+        }
+        try:
+            if action in rights_actions:
+                message = campaign.set_species_rights(
+                    colony.species_id,
+                    rights_actions[action],
+                )
+            elif action in engineering_actions:
+                message = campaign.engineer_species(
+                    colony.system_id,
+                    colony.planet_id,
+                    engineering_actions[action],
+                )
+            elif action == "Synthetic conversion":
+                message = campaign.synthesize_species(
+                    colony.system_id,
+                    colony.planet_id,
+                )
+            elif action == "Migrate population":
+                target = next(
+                    (
+                        item
+                        for item in campaign.player_colonies
+                        if self._species_colony_label(item)
+                        == self._species_destination.selected
+                    ),
+                    None,
+                )
+                if target is None:
+                    self.ui.notify("Choose a matching destination colony")
+                    return
+                message = campaign.migrate_population(
+                    colony.system_id,
+                    colony.planet_id,
+                    target.system_id,
+                    target.planet_id,
+                )
+            else:
+                self.ui.notify("Select a species action")
+                return
+        except (KeyError, ValueError) as error:
+            self.ui.notify(str(error))
+            return
+        self._filter_content()
+        self.ui.notify(message)
 
     def _perform_diplomatic_action(self) -> None:
         assert self.dropdown is not None

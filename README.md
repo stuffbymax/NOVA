@@ -31,17 +31,19 @@ fog, and exploration layers; keyboard shortcuts P, T, R, S, F, and E remain
 available. Ownership appears as translucent territory regions with colored
 frontier lines and faction labels; connected systems owned by the same faction
 are joined into a contiguous territory region. Colonizing a planet expands its
-owner's region. Use the status dropdown and search field to filter stars; press
-Enter in search to locate and center a match. Zoom with the mouse wheel, pan
-with the right mouse button, and press Home to reset the map. Ctrl+B bookmarks
-the selected system and B jumps to the next bookmark. Fog hides uncharted
-systems outside Union sensor coverage. Spiral, elliptical, and irregular
-sectors use different density profiles; positions also include galactic height.
-Generated stars use a
-weighted spectral distribution, approximate masses, luminosities, ages, and
-metallicity gradients. Binary systems constrain stable planet orbits. Planets
-have ordered AU-scale orbits, mass and radius estimates, and only long-lived
-stars with a world in the temperate zone can generate habitable planets.
+owner's region. The command bar presents resource stockpiles and campaign date;
+the active navigation view is highlighted without obscuring the dark map. The
+selected system is marked with a navigation reticle and summarized in the map
+card. Use the status dropdown and search field to filter stars; press Enter in
+search to locate and center a match. Zoom with the mouse wheel, pan with the
+right mouse button, and press Home to reset the map. Ctrl+B bookmarks the
+selected system and B jumps to the next bookmark. Fog hides uncharted systems
+outside Union sensor coverage. Spiral, elliptical, and irregular sectors use
+different density profiles; positions also include galactic height. Generated
+stars use a weighted spectral distribution, approximate masses, luminosities,
+ages, and metallicity gradients. Binary systems constrain stable planet orbits.
+Planets have ordered AU-scale orbits, mass and radius estimates, and only
+long-lived stars with a world in the temperate zone can generate habitable planets.
 Moons, asteroid belts, rare wormholes, nebulae, ancient ruins, and resource
 deposits are seeded too. The route network is connected, and the tutorial
 landmarks remain available in every seed. This is a plausible game-scale
@@ -52,19 +54,23 @@ simulation, not an astronomical catalogue or precision astrophysics model.
 System inspection lists the generated planets, moons, and orbital objects.
 Planet details include climate, atmosphere, surface conditions, gravity,
 physical size, resources when surveyed, and orbital period. Select a planet
-and press M for its management view, H for its event history, or D to return to
-the details view. The management view reports ownership, population, and
-estimated population capacity; surveying and founding a colony add dated
-entries to the planetary history. These environmental and capacity values are
-procedural gameplay estimates, not scientific predictions.
+in the system view to open its dossier. Surveyed and colonized worlds receive a
+procedural 2D planetary illustration and show population, capacity, climate,
+habitability, gravity, atmosphere, terrain, and surveyed deposits. Unsurveyed
+world details remain hidden until a survey is completed. Press M for the
+management view or H for planetary history. Surveying and founding a colony add
+dated entries to the planetary history. These environmental and capacity
+values are procedural gameplay estimates, not scientific predictions.
 
 ## Empire and colony management
 
-The main menu lets you choose Human, Auralith, or Veyran colonists for the
-Union campaign. Species biology, lifespan, growth, climate preferences, needs,
-traits, and hierarchical name pools are defined in `content/species.json`.
-Original species portraits and civilization emblems are in `assets/species/`
-and `assets/civilizations/`.
+The main menu lets you choose Human, Auralith, Veyran, or Synthetic colonists
+for the Union campaign. Click the naming-style selector or press N to cycle
+through all names or a specific culture, including hierarchical Human pools
+such as Uralic and Hungarian. Species biology, lifespan, growth, climate
+preferences, needs, traits, and name pools are defined in
+`content/species.json`. Original species portraits and civilization emblems
+are in `assets/species/` and `assets/civilizations/`.
 
 Open the **EMPIRE** tab to review population, colonies, resource stockpiles,
 construction, research, fleets, and the Veyran Compact. Select a building and
@@ -73,6 +79,17 @@ capital if the selected system is not a Union colony). Buildings consume
 alloys, take time to finish, and then produce resources or research; energy
 upkeep is deducted over time. Population grows according to species biology,
 climate preference, food availability, and planetary capacity.
+
+Open the **SPECIES** tab to review each Union colony's population, species,
+rights, needs, climate fit, and adaptation progress. Select a colony and choose
+an action to change that species' rights, organize migration to another colony
+of the same species, or perform genetic engineering. Research Xenobiology to
+unlock genetic modifications and synthetic conversion. Colonies persistently
+outside their species' preferred climates gradually evolve a natural
+adaptation. Rights affect population growth and happiness; restricted
+populations cannot migrate. Genetic modifications cost 15 science and 3
+influence; synthetic conversion costs 30 science and 5 influence; migration
+costs 1 influence and moves up to 0.1 billion people.
 
 Start research from the Empire tab. Research projects unlock technologies and
 buildings; later projects require their prerequisites. Commission fleets with

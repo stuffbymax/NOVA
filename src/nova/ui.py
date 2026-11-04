@@ -116,9 +116,18 @@ class Button:
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font, theme: Theme) -> None:
         selected = self.hovered or self.focused
-        color = theme.accent if selected else theme.panel_alt
-        pygame.draw.rect(surface, color, self.rect, border_radius=4)
-        text_color = theme.background if selected else theme.text
+        fill = (25, 47, 65) if selected else theme.panel_alt
+        border = theme.accent if selected else (48, 73, 94)
+        pygame.draw.rect(surface, fill, self.rect, border_radius=4)
+        pygame.draw.rect(surface, border, self.rect, 1, border_radius=4)
+        if selected:
+            pygame.draw.rect(
+                surface,
+                theme.accent,
+                pygame.Rect(self.rect.x + 1, self.rect.y + 4, 3, self.rect.height - 8),
+                border_radius=1,
+            )
+        text_color = theme.accent if selected else theme.text
         label = font.render(self.label, True, text_color)
         surface.blit(label, label.get_rect(center=self.rect.center))
 
@@ -129,10 +138,19 @@ class TabBar:
         self.tabs = list(tabs)
         self.active = self.tabs[0] if self.tabs else ""
         self.focused = False
+        self.hovered_index: int | None = None
 
     def handle(self, event: pygame.event.Event) -> bool:
         if not self.tabs:
             return False
+        if event.type == pygame.MOUSEMOTION:
+            if self.rect.collidepoint(event.pos):
+                self.hovered_index = min(
+                    len(self.tabs) - 1,
+                    (event.pos[0] - self.rect.x) * len(self.tabs) // self.rect.width,
+                )
+            else:
+                self.hovered_index = None
         if (
             event.type == pygame.MOUSEBUTTONDOWN
             and event.button == 1
@@ -157,6 +175,8 @@ class TabBar:
     def draw(self, surface: pygame.Surface, font: pygame.font.Font, theme: Theme) -> None:
         if not self.tabs:
             return
+        pygame.draw.rect(surface, theme.panel, self.rect, border_radius=4)
+        pygame.draw.rect(surface, (49, 74, 96), self.rect, 1, border_radius=4)
         tab_width = self.rect.width // len(self.tabs)
         for index, tab in enumerate(self.tabs):
             rect = pygame.Rect(
@@ -166,8 +186,24 @@ class TabBar:
                 self.rect.height,
             )
             active = tab == self.active
-            pygame.draw.rect(surface, theme.accent if active else theme.panel_alt, rect)
-            color = theme.background if active else theme.text
+            hovered = index == self.hovered_index
+            if active:
+                pygame.draw.rect(surface, theme.panel_alt, rect)
+                pygame.draw.rect(
+                    surface,
+                    theme.accent,
+                    pygame.Rect(rect.x + 1, rect.bottom - 3, rect.width - 2, 2),
+                )
+                color = theme.accent
+            else:
+                if hovered:
+                    pygame.draw.rect(
+                        surface,
+                        (22, 42, 62),
+                        rect.inflate(-2, -2),
+                        border_radius=3,
+                    )
+                color = theme.text if hovered else theme.muted
             label_text = {
                 "GALAXY": "MAP",
                 "DIPLOMACY": "DIPLO",
@@ -176,7 +212,7 @@ class TabBar:
             label = font.render(label_text, True, color)
             surface.blit(label, label.get_rect(center=rect.center))
         if self.focused:
-            pygame.draw.rect(surface, theme.warning, self.rect, 2)
+            pygame.draw.rect(surface, theme.warning, self.rect, 1, border_radius=4)
 
 
 class TextInput:
@@ -471,16 +507,23 @@ class UIWindow:
         return False
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font, theme: Theme) -> None:
-        pygame.draw.rect(surface, theme.panel, self.rect, border_radius=5)
+        pygame.draw.rect(surface, (6, 14, 25), self.rect, border_radius=5)
         title_rect = pygame.Rect(
             self.rect.x,
             self.rect.y,
             self.rect.width,
             self.title_height,
         )
-        pygame.draw.rect(surface, theme.panel_alt, title_rect, border_radius=5)
-        pygame.draw.rect(surface, theme.muted, self.rect, 1, border_radius=5)
-        surface.blit(font.render(self.title, True, theme.accent), (self.rect.x + 12, self.rect.y + 8))
+        pygame.draw.rect(surface, (11, 25, 40), title_rect, border_radius=5)
+        pygame.draw.rect(surface, (48, 73, 94), self.rect, 1, border_radius=5)
+        pygame.draw.line(
+            surface,
+            theme.accent,
+            (self.rect.x + 1, self.rect.y + 6),
+            (self.rect.x + 1, self.rect.bottom - 6),
+            2,
+        )
+        surface.blit(font.render(self.title.upper(), True, theme.accent), (self.rect.x + 12, self.rect.y + 8))
         if self.resizable:
             pygame.draw.line(
                 surface,

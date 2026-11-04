@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320">
+  <defs>
+    <radialGradient id="core" cx="48%" cy="35%" r="70%">
+      <stop stop-color="#b9fff2"/>
+      <stop offset=".35" stop-color="#45cbbb"/>
+      <stop offset="1" stop-color="#142d52"/>
+    </radialGradient>
+    <linearGradient id="frame" x2="0" y2="1">
+      <stop stop-color="#d5fff4"/>
+      <stop offset=".55" stop-color="#55b5bc"/>
+      <stop offset="1" stop-color="#294772"/>
+    </linearGradient>
+  </defs>
+  <circle cx="160" cy="160" r="151" fill="#081523" stroke="#55cfc6" stroke-width="4"/>
+  <path d="M92 60h136l27 34v129l-29 37H94l-29-37V94z" fill="#11253a" stroke="url(#frame)" stroke-width="9"/>
+  <path d="M104 101l56-31 56 31v117l-56 34-56-34z" fill="url(#core)" stroke="#d4fff4" stroke-width="5"/>
+  <path d="M113 126h94M113 155h94M113 184h94" fill="none" stroke="#d8fff6" stroke-opacity=".72" stroke-width="5"/>
+  <circle cx="136" cy="146" r="7" fill="#102b45"/>
+  <circle cx="184" cy="146" r="7" fill="#102b45"/>
+  <path d="M137 197q23 17 46 0" fill="none" stroke="#102b45" stroke-width="6" stroke-linecap="round"/>
+  <path d="M82 116L52 98M238 116l30-18M79 204l-27 21M241 204l27 21M160 65V38" fill="none" stroke="#5edbc9" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="49" cy="96" r="7" fill="#ffd27d"/>
+  <circle cx="271" cy="96" r="7" fill="#ffd27d"/>
+  <circle cx="49" cy="225" r="7" fill="#ffd27d"/>
+  <circle cx="271" cy="225" r="7" fill="#ffd27d"/>
+  <circle cx="160" cy="34" r="7" fill="#ffd27d"/>
+</svg>

@@ -42,6 +42,30 @@
         "roman": {
           "given": ["Aurelia", "Cassian", "Livia", "Marcus"],
           "family": ["Aquila", "Marcellus", "Severus", "Valerius"]
+        },
+        "humanoid/human": {
+          "given": ["Mara", "Soren", "Talia", "Ilan"],
+          "family": ["Voss", "Arden", "Kade", "Navarro"]
+        },
+        "humanoid/human/slavic": {
+          "given": ["Anya", "Mikhail", "Vera", "Yuri"],
+          "family": ["Volkov", "Moroz", "Petrov", "Sokolov"]
+        },
+        "humanoid/human/uralic": {
+          "given": ["Aino", "Eero", "Ilona", "Miklos"],
+          "family": ["Kovacs", "Nagy", "Virtanen", "Toth"]
+        },
+        "humanoid/human/uralic/hungarian": {
+          "given": ["Ilona", "Miklos", "Eszter", "Bela"],
+          "family": ["Kovacs", "Nagy", "Toth", "Varga"]
+        },
+        "humanoid/human/latin": {
+          "given": ["Aurelia", "Cassian", "Livia", "Marcus"],
+          "family": ["Aquila", "Marcellus", "Severus", "Valerius"]
+        },
+        "humanoid/human/latin/roman": {
+          "given": ["Aurelia", "Cassian", "Livia", "Marcus"],
+          "family": ["Aquila", "Marcellus", "Severus", "Valerius"]
         }
       }
     },
@@ -84,6 +108,28 @@
         "amphibious": {
           "given": ["Neris", "Thalen", "Osha", "Vael"],
           "family": ["Mire", "Tide", "Reef", "Current"]
+        }
+      }
+    },
+    {
+      "id": "synthetic",
+      "name": "Synthetic",
+      "classification": ["Artificial", "Machine"],
+      "lifespan_years": 5000,
+      "annual_growth_rate": 0.004,
+      "preferred_climates": ["Temperate", "Ocean", "Jungle", "Arid", "Polar", "Volcanic"],
+      "needs": ["Energy", "Minerals", "Maintenance"],
+      "traits": ["Modular chassis", "Machine cognition"],
+      "portrait": "species/synthetic.svg",
+      "synthetic": true,
+      "names": {
+        "all": {
+          "given": ["Axiom", "Kernel", "Nexus", "Orion"],
+          "family": ["Unit-7", "Circuit", "Protocol", "Vector"]
+        },
+        "machine": {
+          "given": ["Axiom", "Kernel", "Nexus", "Orion"],
+          "family": ["Unit-7", "Circuit", "Protocol", "Vector"]
         }
       }
     }

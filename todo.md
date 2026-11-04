@@ -158,7 +158,7 @@
 ## 8. Species and Biology
 
 - [✔ ] Implement species creation
-- [ ] Implement json names for species that game will use at random but they will have subclases like humanoid > humans > slavic > uralic > hungarian etc users can select what names they can have like all or just one also latin (roman empire) 
+- [✔ ] Implement hierarchical, selectable JSON name cultures for species
 - [✔ ] Implement species attributes
 - [✔ ] Implement biological characteristics
 - [✔ ] Implement species portraits
@@ -167,12 +167,12 @@
 - [✔ ] Implement environmental preferences
 - [✔ ] Implement biological needs
 - [✔ ] Implement genetic traits
-- [ ] Implement genetic engineering
-- [ ] Implement species evolution
-- [ ] Implement synthetic species
+- [✔ ] Implement genetic engineering
+- [✔ ] Implement species evolution
+- [✔ ] Implement synthetic species
 - [✔ ] Implement species compatibility
-- [ ] Implement species migration
-- [ ] Implement species rights
+- [✔ ] Implement species migration
+- [✔ ] Implement species rights
 
 ## 9. Colonisation and Expansion
 

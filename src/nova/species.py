@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import random
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -18,19 +19,49 @@ class SpeciesProfile:
     traits: tuple[str, ...]
     portrait: str
     name_sets: dict[str, tuple[tuple[str, ...], tuple[str, ...]]]
+    synthetic: bool = False
+    derived_from: str | None = None
+
+    @property
+    def name_cultures(self) -> tuple[str, ...]:
+        return ("all", *sorted(culture for culture in self.name_sets if culture != "all"))
+
+    def _name_pools(
+        self,
+        culture: str,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        requested = culture.casefold().strip().replace("\\", "/").strip("/")
+        if not requested or requested == "all":
+            selected = tuple(self.name_sets.values())
+        else:
+            roots = [
+                name
+                for name in self.name_sets
+                if name == requested
+                or name.endswith(f"/{requested}")
+            ]
+            if not roots:
+                raise ValueError(f"Unknown {self.name} naming culture: {culture}")
+            descendants = [
+                pools
+                for name, pools in self.name_sets.items()
+                if any(name.startswith(f"{root}/") for root in roots)
+            ]
+            deepest = max(root.count("/") for root in roots)
+            selected = tuple(
+                [
+                    self.name_sets[root]
+                    for root in roots
+                    if root.count("/") == deepest
+                ]
+                + descendants
+            )
+        given = tuple(dict.fromkeys(name for first, _ in selected for name in first))
+        family = tuple(dict.fromkeys(name for _, second in selected for name in second))
+        return given, family
 
     def generate_name(self, seed: int, culture: str = "all") -> str:
-        if culture == "all":
-            pools = tuple(self.name_sets.values())
-            given = tuple(dict.fromkeys(name for pool, _ in pools for name in pool))
-            family = tuple(dict.fromkeys(name for _, pool in pools for name in pool))
-        else:
-            try:
-                given, family = self.name_sets[culture.casefold()]
-            except KeyError as error:
-                raise ValueError(
-                    f"Unknown {self.name} naming culture: {culture}"
-                ) from error
+        given, family = self._name_pools(culture)
         if not given or not family:
             raise ValueError(f"{self.name} has an empty name pool")
         rng = random.Random(seed)
@@ -38,6 +69,53 @@ class SpeciesProfile:
 
     def is_compatible_with(self, other: "SpeciesProfile") -> bool:
         return bool(set(self.preferred_climates) & set(other.preferred_climates))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "species_id": self.species_id,
+            "name": self.name,
+            "classification": list(self.classification),
+            "lifespan_years": self.lifespan_years,
+            "annual_growth_rate": self.annual_growth_rate,
+            "preferred_climates": list(self.preferred_climates),
+            "needs": list(self.needs),
+            "traits": list(self.traits),
+            "portrait": self.portrait,
+            "name_sets": {
+                culture: {"given": list(given), "family": list(family)}
+                for culture, (given, family) in self.name_sets.items()
+            },
+            "synthetic": self.synthetic,
+            "derived_from": self.derived_from,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SpeciesProfile":
+        name_sets = {
+            str(culture).casefold(): (
+                tuple(map(str, names["given"])),
+                tuple(map(str, names["family"])),
+            )
+            for culture, names in data["name_sets"].items()
+        }
+        return cls(
+            species_id=str(data["species_id"]),
+            name=str(data["name"]),
+            classification=tuple(map(str, data["classification"])),
+            lifespan_years=int(data["lifespan_years"]),
+            annual_growth_rate=float(data["annual_growth_rate"]),
+            preferred_climates=tuple(map(str, data["preferred_climates"])),
+            needs=tuple(map(str, data["needs"])),
+            traits=tuple(map(str, data["traits"])),
+            portrait=str(data["portrait"]),
+            name_sets=name_sets,
+            synthetic=bool(data.get("synthetic", False)),
+            derived_from=(
+                str(data["derived_from"])
+                if data.get("derived_from") is not None
+                else None
+            ),
+        )
 
 
 def load_species_catalog(manifest_path: Path) -> dict[str, SpeciesProfile]:
@@ -71,6 +149,12 @@ def load_species_catalog(manifest_path: Path) -> dict[str, SpeciesProfile]:
                 traits=tuple(map(str, entry["traits"])),
                 portrait=str(entry["portrait"]),
                 name_sets=name_sets,
+                synthetic=bool(entry.get("synthetic", False)),
+                derived_from=(
+                    str(entry["derived_from"])
+                    if entry.get("derived_from") is not None
+                    else None
+                ),
             )
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ValueError(
@@ -82,6 +166,8 @@ def load_species_catalog(manifest_path: Path) -> dict[str, SpeciesProfile]:
             raise ValueError(f"Invalid biology for species {species_id}")
         if not profile.classification or not profile.name_sets:
             raise ValueError(f"Incomplete species definition: {species_id}")
+        if not profile.preferred_climates or not profile.traits or not profile.needs:
+            raise ValueError(f"Incomplete biology definition: {species_id}")
         if Path(profile.portrait).is_absolute() or ".." in Path(profile.portrait).parts:
             raise ValueError(f"Unsafe portrait path for species {species_id}")
         if any(not given or not family for given, family in profile.name_sets.values()):
