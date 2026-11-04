@@ -1,15 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <defs>
-    <radialGradient id="bg"><stop stop-color="#174d58"/><stop offset="1" stop-color="#07111f"/></radialGradient>
-    <linearGradient id="skin" x2=".8" y2="1"><stop stop-color="#9be5c4"/><stop offset="1" stop-color="#267a78"/></linearGradient>
-  </defs>
-  <rect width="256" height="256" rx="22" fill="url(#bg)"/>
-  <path d="M38 256c7-53 40-79 90-79s83 26 90 79" fill="#154354" stroke="#54d7d1" stroke-width="3"/>
-  <path d="M89 164q-13-30-10-60 2-48 49-58 47 10 49 58 3 30-10 60-16 19-39 19t-39-19z" fill="url(#skin)"/>
-  <path d="M81 91Q45 57 66 44q22-10 40 14m69 33q36-34 15-47-22-10-40 14" fill="#53b2a1" stroke="#b4f1d8" stroke-width="3"/>
-  <path d="M97 112q12-9 24 0m14 0q12-9 24 0" fill="none" stroke="#14333d" stroke-width="5" stroke-linecap="round"/>
-  <path d="M111 142q17 13 34 0" fill="none" stroke="#174c53" stroke-width="4" stroke-linecap="round"/>
-  <path d="M79 205q24 16 49 16t49-16" fill="none" stroke="#ffc46b" stroke-width="5"/>
-  <circle cx="128" cy="215" r="7" fill="#ffc46b"/>
-  <path d="M58 104q12-7 22 0m96 0q10-7 22 0" fill="none" stroke="#c1fff0" stroke-opacity=".75" stroke-width="3"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><defs><radialGradient id="bg"><stop stop-color="#174d58"/><stop offset="1" stop-color="#07111f"/></radialGradient><linearGradient id="skin" x2=".8" y2="1"><stop stop-color="#9be5c4"/><stop offset="1" stop-color="#267a78"/></linearGradient></defs><rect width="256" height="256" fill="url(#bg)" rx="22"/><path fill="#154354" stroke="#54d7d1" stroke-width="3" d="M38 256c7-53 40-79 90-79s83 26 90 79"/><path fill="url(#skin)" d="M89 164q-13-30-10-60 2-48 49-58 47 10 49 58 3 30-10 60-16 19-39 19t-39-19z"/><path fill="#53b2a1" stroke="#b4f1d8" stroke-width="3" d="M81 91Q45 57 66 44q22-10 40 14m69 33q36-34 15-47-22-10-40 14"/><path fill="none" stroke="#14333d" stroke-linecap="round" stroke-width="5" d="M97 112q12-9 24 0m14 0q12-9 24 0"/><path fill="none" stroke="#174c53" stroke-linecap="round" stroke-width="4" d="M111 142q17 13 34 0"/><path fill="none" stroke="#ffc46b" stroke-width="5" d="M79 205q24 16 49 16t49-16"/><circle cx="128" cy="215" r="7" fill="#ffc46b"/><path fill="none" stroke="#c1fff0" stroke-opacity=".75" stroke-width="3" d="M58 104q12-7 22 0m96 0q10-7 22 0"/></svg>
